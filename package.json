@@ -1,6 +1,6 @@
 {
   "name": "dsh-dingo",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "description": "DSH 声音提醒 + 对话直达插件（Dingo = Ding + Go）：当前对话回复当/当当提示音（crisp 档），其他对话叮/叮叮提醒（soft 档）+ 右上角小卡片点击直达对应对话。无 ASR、无 TTS。",
   "keywords": [
     "dsh",
