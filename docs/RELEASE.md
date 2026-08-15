@@ -41,5 +41,5 @@ npm view dsh-dingo version   # 应显示新版本（刚发布有短暂传播延�
 - npm 包名：`dsh-dingo`（registry.npmjs.org，登录账号 robinwlive）
 - GitHub：https://github.com/february2015/dsh-dingo
 - 打包内容（`files` 字段）：`lib/`（构建产物 + 类型）、`cordis.patch.yml`、
-  `README.md`、`LICENSE`；`prepack` 自动跑 `build` 重建 `lib/`。
+  `README.md`（英文默认）、`README.zh.md`（中文）、`LICENSE`；`prepack` 自动跑 `build` 重建 `lib/`。
 - 安装：`dsh plugin --profile web add dsh-dingo`（`web` 为本机 profile 名）
