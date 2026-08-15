@@ -1,0 +1,7 @@
+# dsh-dingo bundle layer: mounts the notification plugin (host half +
+# web client half) into the profile. Users compose this bundle into a profile
+# and override feedback/channelAuthority from their own profile patch.
+- insert:
+    - id: dsh-dingo
+      name: dsh-dingo
+      config: {}
