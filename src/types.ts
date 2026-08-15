@@ -28,7 +28,7 @@ export interface Config {
     announceOwnSessions: boolean;
     /** 静音时段（"HH:mm" 24h；空串 = 无；start>end 视为跨夜）。 */
     quietHours: { start: string; end: string };
-    /** 提示音档位（soft 柔和默认 / crisp 清脆；当前对话用 soft，其他对话用另一档）。 */
+    /** 提示音档位（soft 柔和"叮" / crisp 清脆"当"；当前对话用 crisp，其他对话用 soft）。 */
     toneStyle: 'soft' | 'crisp';
   };
   /** `/dingo on|off` 开关（默认开）。 */

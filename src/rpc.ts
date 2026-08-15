@@ -48,8 +48,8 @@ export function installDingoRpc(ctx: Context, deps: DingoRpcDeps, authority: Cha
           return handleFeedbackEndpoint(deps.feedback, payload);
         }
         case 'set-current-session': {
-          // 客户端上报"当前查看的对话"：当前对话回复 → 叮/叮叮（soft 档），
-          // 其他对话 → 另一声音（crisp 档）+ 卡片；own 判定也用它。
+          // 客户端上报"当前查看的对话"：当前对话回复 → 叮/叮叮（crisp 档"当"），
+          // 其他对话 → 另一声音（soft 档"叮"）+ 卡片；own 判定也用它。
           const record = (typeof payload === 'object' && payload !== null ? payload : {}) as Record<string, unknown>;
           const sid = typeof record.sessionId === 'string' && record.sessionId !== '' ? record.sessionId : undefined;
           deps.setCurrentSessionId?.(sid);

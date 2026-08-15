@@ -283,14 +283,14 @@ export function FeedbackCard({ rpc, openSession: openTarget, useSessions }: Feed
           })
           const speakingIds = new Set(next.queue.filter((item) => item.state === 'speaking').map((item) => item.id))
           // speaking 项 → 首次见播放提示音 + 记录。
-          // 音色按归属：当前对话（own）用本地音 soft 档，非当前对话用
-          // 另一套声音 crisp 档（"另一个声音"），都是 1 声=有回复 / 2 声=需回答。
+          // 音色按归属：当前对话（own）用 crisp 档（"当"），非当前对话用
+          // soft 档（"叮"），都是 1 声=有回复 / 2 声=需回答。
           for (const item of next.queue) {
             if (item.state !== 'speaking') continue
             seenSpeaking.current.add(item.id)
             if (item.tone !== 'none' && !tonePlayed.current.has(item.id)) {
               tonePlayed.current.add(item.id)
-              playTone(item.tone, item.own === true ? 'soft' : 'crisp')
+              playTone(item.tone, item.own === true ? 'crisp' : 'soft')
             }
           }
           // 曾 speaking、本轮已不 speaking（host 超时/上报后移除）→ 补报 spoken
@@ -322,8 +322,8 @@ export function FeedbackCard({ rpc, openSession: openTarget, useSessions }: Feed
     }
   }, [rpc])
 
-  // 上报"当前查看的对话"：host 判定当前对话回复 → 叮/叮叮（soft 档），
-  // 其他对话 → 另一声音（crisp 档）+ 卡片。切换对话时实时上报。
+  // 上报"当前查看的对话"：host 判定当前对话回复 → 叮/叮叮（crisp 档"当"），
+  // 其他对话 → 另一声音（soft 档"叮"）+ 卡片。切换对话时实时上报。
   useEffect(() => {
     void rpc.call('/dingo', 'set-current-session', { sessionId: currentSessionId }).catch(() => {})
   }, [currentSessionId, rpc])

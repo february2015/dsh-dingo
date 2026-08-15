@@ -1,8 +1,8 @@
 /**
  * dsh-dingo — DSH 声音提醒插件（host half）。
  *
- * 当前对话回复：叮（有回复）/ 叮叮（需回答）提示音（soft 档）；
- * 其他对话回复：另一套声音（crisp 档）同样 1 声/2 声区分 + 右上角小卡片
+ * 当前对话回复：叮（有回复）/ 叮叮（需回答）提示音（crisp 档"当"）；
+ * 其他对话回复：另一套声音（soft 档"叮"）同样 1 声/2 声区分 + 右上角小卡片
  * （工作区 + 对话标题 + 状态图标），点击卡片直达对应对话。
  *
  * 无 ASR、无 TTS：全部逻辑 = 会话事件 → 判定级别（isQuestionText）→
@@ -43,7 +43,7 @@ export const Config = z.object({
     announceOwnSessions: z.boolean().default(false),
     // 静音时段（"HH:mm"；空串 = 无）→ 任务类只入队不发声，结束后补播
     quietHours: z.object({ start: z.string().default(''), end: z.string().default('') }).default({ start: '', end: '' }),
-    // 提示音档位：soft（当前对话叮/叮叮）/ crisp（其他对话"另一个声音"）
+    // 提示音档位：crisp（当前对话"当"）/ soft（其他对话"叮"）
     toneStyle: z.union(['soft', 'crisp']).default('soft'),
   }),
   enabled: z.boolean().default(true), // /dingo on|off 开关（默认开；settings 持久化）
