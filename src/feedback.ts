@@ -1104,14 +1104,14 @@ async function loadSessionTitles(api: SessionListApi): Promise<Map<string, strin
   return map;
 }
 
-/** 从 session.list 条目提取会话标题（`session/title` 投影；无标题返回 undefined）。 */
+/**
+ * 从 session.list 条目提取会话标题（`title` 投影：纯字符串，见
+ * @deepseek-ai/dsh-session-title —— 键是 'title' 不是 'session/title'，
+ * 值是 string 不是对象；侧边栏显示用的同一投影）。无标题返回 undefined。
+ */
 function sessionTitleOf(item: { projections?: { values?: Readonly<Record<string, unknown>> } }): string | undefined {
-  const titleValue = item.projections?.values?.['session/title'];
-  if (typeof titleValue === 'object' && titleValue !== null && 'title' in titleValue) {
-    const title = (titleValue as { title?: unknown }).title;
-    return typeof title === 'string' && title !== '' ? title : undefined;
-  }
-  return undefined;
+  const title = item.projections?.values?.['title'];
+  return typeof title === 'string' && title !== '' ? title : undefined;
 }
 
 /** 生成一次宿主 RPC 调用 id（与 T-3 rpc.ts 相同的降级姿势）。 */

@@ -18,6 +18,7 @@
  * @module dsh-localvoice/client/FeedbackCard
  */
 import { useEffect, useRef, useState } from 'react'
+import type { SessionListState } from '@deepseek-ai/dsh-client-runtime/client'
 import type { RpcCall } from './rpc.ts'
 import { resolveToneUrl, type ToneStyle } from './tones.ts'
 
@@ -62,10 +63,10 @@ const CARD_KEEP_MS = 30_000
 
 /**
  * 定位"Session log 下载按钮"（对话区域右上角）：扫描按钮，匹配
- * aria-label/title/文本含 "session" + "log"。返回其左上角坐标；
- * 找不到返回 undefined（卡片回退视口右上角）。
+ * aria-label/title/文本含 "session" + "log"。返回其左上角坐标与尺寸
+ * （卡片锚定到按钮正下方）；找不到返回 undefined（卡片回退视口右上角）。
  */
-function findSessionLogAnchor(): { left: number; top: number } | undefined {
+function findSessionLogAnchor(): { left: number; top: number; width: number; height: number } | undefined {
   if (typeof document === 'undefined') return undefined
   const candidates = Array.from(document.querySelectorAll('button, [role="button"]'))
   for (const el of candidates) {
@@ -76,7 +77,9 @@ function findSessionLogAnchor(): { left: number; top: number } | undefined {
     ).toLowerCase()
     if (label.includes('session') && label.includes('log')) {
       const rect = el.getBoundingClientRect()
-      if (rect.width > 0 && rect.height > 0) return { left: rect.left, top: rect.top }
+      if (rect.width > 0 && rect.height > 0) {
+        return { left: rect.left, top: rect.top, width: rect.width, height: rect.height }
+      }
     }
   }
   return undefined
@@ -111,13 +114,17 @@ function CategoryIcon({ category }: { category: AnnouncementView['category'] }):
   }
 }
 
-/** FeedbackCard 注入面：/dingo RPC 调用器 + 会话跳转 + 当前会话读取（框架注入）。 */
+/** FeedbackCard 注入面：/dingo RPC 调用器 + 会话跳转 + 会话快照（框架注入）。 */
 export interface FeedbackCardProps {
   rpc: RpcCall
   /** 打开指定会话（卡片点击跳转；由 apply 注入，内部走 sessions.open）。 */
   openSession?: (sessionId: string) => void
-  /** 框架标准钩子：读取全局会话列表快照（current = 当前打开的对话）。 */
-  useSessions?: (selector: (s: { current?: string }) => string | undefined) => string | undefined
+  /**
+   * 框架标准钩子：读取全局会话列表快照（标准 selector 形状）。
+   * - `current`：当前打开的对话；
+   * - `byId`：各会话 displayTitle（与侧边栏同一数据源，卡片标题兜底）。
+   */
+  useSessions?: <T>(selector: (s: SessionListState) => T) => T | undefined
 }
 
 /** 播放一段内置提示音（data URL；失败静默；T-8 按档位选音）。 */
@@ -151,6 +158,8 @@ export function FeedbackCard({ rpc, openSession: openTarget, useSessions }: Feed
   const [snapshot, setSnapshot] = useState<FeedbackSnapshotView | undefined>(undefined)
   /** 当前打开的对话（框架注入；上报 host 用于"当前对话叮/叮叮"判定）。 */
   const currentSessionId = useSessions?.((s) => s.current)
+  /** 各会话 displayTitle（与侧边栏同一数据源；host 标题缺失时卡片兜底显示）。 */
+  const sessionTitles = useSessions?.((s) => s.byId)
   // 已播放过提示音的 speaking 项（每 id 一次）
   const tonePlayed = useRef(new Set<string>())
   // 见过 speaking 的项（speaking → 消失 的过渡只报一次 spoken）
@@ -161,7 +170,7 @@ export function FeedbackCard({ rpc, openSession: openTarget, useSessions }: Feed
   // 直到用户点击跳转 / × 关闭 / 超时自动清理。
   const [cards, setCards] = useState<Map<string, { item: AnnouncementView; seenAt: number }>>(new Map())
   // Session log 按钮锚点（对话区域右上角；找不到 = undefined → 回退视口右上角）。
-  const [anchor, setAnchor] = useState<{ left: number; top: number } | undefined>(undefined)
+  const [anchor, setAnchor] = useState<{ left: number; top: number; width: number; height: number } | undefined>(undefined)
   // 被拖离默认位置（右上角栈）的卡片：id → fixed 坐标（viewport）。
   const [offsets, setOffsets] = useState<Record<string, { left: number; top: number }>>({})
   // 正在拖动的卡片 id（拖动中高亮样式）。
@@ -330,10 +339,13 @@ export function FeedbackCard({ rpc, openSession: openTarget, useSessions }: Feed
       className="lv-fb"
       style={{
         ...styles.container,
-        // 锚定到 Session log 下载按钮左侧（顶部对齐按钮，从上往下排列）；
+        // 锚定到 Session log 下载按钮正下方（右边缘对齐按钮，向下排列）；
         // 找不到锚点时回退视口右上角
         ...(anchor !== undefined
-          ? { top: anchor.top, right: Math.max(8, window.innerWidth - anchor.left + 8) }
+          ? {
+              top: anchor.top + anchor.height + 8,
+              right: Math.max(8, window.innerWidth - (anchor.left + anchor.width)),
+            }
           : {}),
       }}
     >
@@ -367,7 +379,12 @@ export function FeedbackCard({ rpc, openSession: openTarget, useSessions }: Feed
                 {truncate(item.workspaceTitle ?? '', 12) || '对话'}
               </span>
               <span style={styles.session}>
-                {truncate(item.sessionTitle ?? '', 10) || '（未命名对话）'}
+                {truncate(
+                  item.sessionTitle
+                    ?? (sessionTitles as Record<string, { displayTitle?: string }> | undefined)?.[item.sessionId ?? '']?.displayTitle
+                    ?? '',
+                  10,
+                ) || '（未命名对话）'}
               </span>
             </span>
             <button
