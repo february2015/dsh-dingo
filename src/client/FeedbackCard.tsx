@@ -171,18 +171,6 @@ export function FeedbackCard({ rpc, openSession: openTarget, useSessions }: Feed
   const [cards, setCards] = useState<Map<string, { item: AnnouncementView; seenAt: number }>>(new Map())
   // Session log 按钮锚点（对话区域右上角；找不到 = undefined → 回退视口右上角）。
   const [anchor, setAnchor] = useState<{ left: number; top: number; width: number; height: number } | undefined>(undefined)
-  // 被拖离默认位置（右上角栈）的卡片：id → fixed 坐标（viewport）。
-  const [offsets, setOffsets] = useState<Record<string, { left: number; top: number }>>({})
-  // 正在拖动的卡片 id（拖动中高亮样式）。
-  const [draggingId, setDraggingId] = useState<string | undefined>(undefined)
-  // 当前拖拽会话（down → move/up）。
-  const dragRef = useRef<{
-    id: string
-    startX: number
-    startY: number
-    anchor: { left: number; top: number }
-    moved: boolean
-  } | null>(null)
 
   /** 移除一张本地卡片（关闭/跳转/超时共用）。 */
   const removeCard = (id: string): void => {
@@ -193,52 +181,6 @@ export function FeedbackCard({ rpc, openSession: openTarget, useSessions }: Feed
     })
   }
 
-  /** 拖动开始：按钮区除外；记录起点锚点（已拖过用现偏移，否则用当前 rect）。 */
-  const onDragStart = (event: React.PointerEvent<HTMLDivElement>, id: string): void => {
-    if ((event.target as HTMLElement).closest('button')) return // 按钮区不启动拖动
-    event.preventDefault() // 防文本选择/触摸滚动
-    const rect = event.currentTarget.getBoundingClientRect()
-    dragRef.current = {
-      id,
-      startX: event.clientX,
-      startY: event.clientY,
-      anchor: offsets[id] ?? { left: rect.left, top: rect.top },
-      moved: false,
-    }
-    try {
-      event.currentTarget.setPointerCapture(event.pointerId)
-    } catch {
-      // 环境不支持 capture：退化为不捕获（move/up 仍需在卡片内发生）
-    }
-  }
-
-  const onDragMove = (event: React.PointerEvent<HTMLDivElement>, id: string): void => {
-    const drag = dragRef.current
-    if (drag === null || drag.id !== id) return
-    const dx = event.clientX - drag.startX
-    const dy = event.clientY - drag.startY
-    if (!drag.moved && Math.abs(dx) + Math.abs(dy) > 5) {
-      drag.moved = true
-      setDraggingId(id)
-    }
-    if (drag.moved) {
-      setOffsets((prev) => ({ ...prev, [id]: { left: drag.anchor.left + dx, top: drag.anchor.top + dy } }))
-    }
-  }
-
-  /** 拖动结束：移动超阈值 = 已拖动（不跳转）；否则视为轻点 → 跳转对话。 */
-  const onDragEnd = (event: React.PointerEvent<HTMLDivElement>, id: string, item: AnnouncementView): void => {
-    const drag = dragRef.current
-    dragRef.current = null
-    setDraggingId(undefined)
-    if (drag === null || drag.id !== id) return
-    try {
-      event.currentTarget.releasePointerCapture(event.pointerId)
-    } catch {
-      // noop
-    }
-    if (!drag.moved) handleOpenSession(item)
-  }
 
   /** 点击卡片本体 → 跳到对应对话（无 sessionId 的卡片不可跳转）。 */
   const handleOpenSession = (item: AnnouncementView): void => {
@@ -350,27 +292,14 @@ export function FeedbackCard({ rpc, openSession: openTarget, useSessions }: Feed
       }}
     >
       {items.map((item) => {
-        const offset = offsets[item.id]
-        const dragging = draggingId === item.id
         return (
           <div
             key={item.id}
             className={`lv-fb__toast ${CATEGORY_META[item.category].className}`}
-            style={{
-              ...styles.toast,
-              // 被拖走的卡片脱离右上角排列，固定在放下位置（其余卡片自动补位）
-              ...(offset !== undefined ? { position: 'fixed', left: offset.left, top: offset.top } : {}),
-              ...(dragging ? styles.toastDragging : {}),
-            }}
+            style={styles.toast}
             data-state={item.state}
-            title={item.sessionId ? '轻点跳转到该对话，按住可拖动' : undefined}
-            onPointerDown={(e) => onDragStart(e, item.id)}
-            onPointerMove={(e) => onDragMove(e, item.id)}
-            onPointerUp={(e) => onDragEnd(e, item.id, item)}
-            onPointerCancel={() => {
-              dragRef.current = null
-              setDraggingId(undefined)
-            }}
+            title={item.sessionId ? '点击跳转到该对话' : undefined}
+            onClick={() => handleOpenSession(item)}
           >
             {/* 固定小卡片：状态图标 + 工作区名 + 对话标题前几字（不显示播报文本） */}
             <CategoryIcon category={item.category} />
@@ -437,8 +366,7 @@ const styles: Record<string, React.CSSProperties> = {
     lineHeight: 1.4,
     cursor: 'pointer',
     border: '1px solid transparent',
-    // 触摸拖动时不触发页面滚动/缩放
-    touchAction: 'none',
+    // 防点击时选中文本
     userSelect: 'none',
     WebkitUserSelect: 'none',
   },
@@ -515,10 +443,5 @@ const styles: Record<string, React.CSSProperties> = {
     lineHeight: '16px',
     cursor: 'pointer',
     padding: 0,
-  },
-  // 拖动中的卡片：抬升阴影，提示正在拖动
-  toastDragging: {
-    boxShadow: '0 6px 20px rgba(0,0,0,0.5)',
-    zIndex: 1001,
   },
 }

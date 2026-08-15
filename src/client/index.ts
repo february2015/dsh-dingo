@@ -5,7 +5,7 @@
  * - 轮询 `/dingo.feedback {action:'announcements'}` 取提醒队列快照；
  * - 当前对话（own）项 → 只播提示音（crisp 档"当"：叮=有回复 / 叮叮=需回答），不显示卡片；
  * - 其他对话项 → 另一套声音（soft 档"叮"）1 声/2 声 + 右上角小卡片
- *   （工作区 + 对话标题 + 状态图标），点击直达对话、× 关闭、按住拖动；
+ *   （工作区 + 对话标题 + 状态图标），点击直达对话、× 关闭；
  * - 上报"当前查看的对话"（/dingo.set-current-session）。
  *
  * @module dsh-dingo/client
