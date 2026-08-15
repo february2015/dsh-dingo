@@ -4,7 +4,7 @@
 
 **Ding + Go** — sound reminders + **one-click jump** for [DeepSeek Harness](https://github.com/deepseek-ai/deepseek-harness) (DSH).
 
-Hear it, reach it: when another conversation replies, a tone alerts you and a small card appears — **one click takes you straight to that conversation**. It doesn't just tell you "something happened"; it puts you in front of the conversation (the core capability that sets it apart from plain notifiers).
+Hear it, reach it: when another conversation replies, a tone alerts you and a small card appears — **one click takes you straight to that conversation**; and when you've switched to another app, a **system notification** (macOS Notification Center / Windows toast) still gets through — click it to jump right in. It doesn't just tell you "something happened"; it puts you in front of the conversation (the core capability that sets it apart from plain notifiers).
 
 **Great when you run many conversations in parallel**: open several chats (including subagents) side by side and stop watching them one by one — when any of them replies, you hear a distinct tone and the card shows the workspace/conversation name; click it and you're there. Never miss a reply while you work on something else, and switch between tasks with ease.
 
