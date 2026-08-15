@@ -23,6 +23,9 @@ import type { ChannelAuthority } from './types.ts';
 
 export const name = 'dsh-dingo';
 
+/** 插件初始化前必须可用的宿主服务。 */
+export const inject = ['connection', 'apiProxy'] as const;
+
 /** 设置命名空间（settings UI / profile patch 可覆盖）。 */
 const NS = 'dingo';
 

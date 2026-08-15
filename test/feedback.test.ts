@@ -7,6 +7,7 @@
  */
 import { describe, expect, it } from 'vitest'
 import { FeedbackEngine, formatAnnouncement, firstParagraph, isQuietNow, toMinutes } from '../src/feedback.ts'
+import { inject } from '../src/index.ts'
 import { FakeAudio, feedbackConfig, flush } from './feedback-fixture.ts'
 import type { FeedbackAudio } from '../src/feedback.ts'
 
@@ -33,6 +34,12 @@ function build(options: {
 function sessionEvent(type: string, data: unknown = {}, extra: Record<string, unknown> = {}): { type: string; data: unknown; [k: string]: unknown } {
   return { type, data, ...extra }
 }
+
+describe('plugin dependencies', () => {
+  it('declares host services before feedback and RPC initialization read them', () => {
+    expect(inject).toEqual(expect.arrayContaining(['connection', 'apiProxy']))
+  })
+})
 
 describe('事件源分类（Step 1）', () => {
   it('其他对话回复含疑问（assistant/message + turn/end）→ need-confirm（叮叮）', async () => {
