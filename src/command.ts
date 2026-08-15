@@ -39,7 +39,7 @@ async function dingoCommand(invocation: CommandInvocation, deps: DingoCommandDep
   const raw = invocation.rawInput.trim();
   if (raw === 'on' || raw === 'off') {
     const now = deps.runtime.setEnabled(raw === 'on');
-    const tip = now ? '提醒已开启：当前对话叮/叮叮，其他对话另一声音 + 卡片。' : '提醒已关闭。';
+    const tip = now ? '提醒已开启：当前对话当/当当（crisp 档），其他对话叮/叮叮（soft 档）+ 卡片。' : '提醒已关闭。';
     return { kind: 'success', text: `dsh-dingo is now ${now ? 'ON' : 'off'}. ${tip}` };
   }
   if (raw === 'status' || raw === '') {

@@ -1,7 +1,7 @@
 /**
  * dsh-dingo — DSH 声音提醒插件（host half）。
  *
- * 当前对话回复：叮（有回复）/ 叮叮（需回答）提示音（crisp 档"当"）；
+ * 当前对话回复：当（有回复）/ 当当（需回答）提示音（crisp 档）；
  * 其他对话回复：另一套声音（soft 档"叮"）同样 1 声/2 声区分 + 右上角小卡片
  * （工作区 + 对话标题 + 状态图标），点击卡片直达对应对话。
  *
@@ -38,7 +38,7 @@ export const Config = z.object({
     dnd: z.boolean().default(false),
     confirmNeverSilent: z.boolean().default(true),
     dedupeWindowMs: z.number().default(10000),
-    // 当前对话自身事件默认不由插播队列处理（当前对话回复走"叮/叮叮"提示音，
+    // 当前对话自身事件默认不由插播队列处理（当前对话回复走"当/当当"提示音，
     // 由 apply 内的 current-reply 订阅直接入队 own 提醒）
     announceOwnSessions: z.boolean().default(false),
     // 静音时段（"HH:mm"；空串 = 无）→ 任务类只入队不发声，结束后补播
@@ -88,7 +88,7 @@ export function apply(ctx: Context, config: unknown): void {
   };
   let feedback: FeedbackEngine = installFeedback(ctx, installOptions);
 
-  // ── 当前对话回复 → 立即叮/叮叮（own 提醒，不显示卡片） ──────────────
+  // ── 当前对话回复 → 立即当/当当（own 提醒，不显示卡片） ──────────────
   // 客户端上报"当前查看的会话"（/dingo.set-current-session）→ currentSessionId。
   let currentSessionId: string | undefined;
   ctx.effect(() => ctx.on('session/event', (session: Session, event: SessionEvent) => {
@@ -97,7 +97,7 @@ export function apply(ctx: Context, config: unknown): void {
     if (sessionId !== currentSessionId) return; // 只看当前对话
     const text = extractMessageText((event as unknown as { data?: { message?: { content?: unknown } } }).data?.message?.content);
     if (text === '') return;
-    // 回复含疑问/请求确认 → 叮叮（需回答）；否则 → 叮（有回复）
+    // 回复含疑问/请求确认 → 当当（需回答）；否则 → 当（有回复）
     feedback.announce(isQuestionText(text) ? 'need-confirm' : 'task-done', {
       sessionId,
       summary: text,

@@ -1,7 +1,7 @@
 /**
  * dsh-dingo — 共享类型（host/client 双半共用）。
  *
- * 声音提醒插件：当前对话回复叮/叮叮区分，其他对话另一声音 + 右上角卡片直达。
+ * 声音提醒插件：当前对话回复当/当当（crisp 档）区分，其他对话叮/叮叮（soft 档）+ 右上角卡片直达。
  * 无 ASR、无 TTS。
  *
  * @module dsh-dingo/types
@@ -22,9 +22,9 @@ export interface Config {
     dnd: boolean;
     /** 确认类（需回答）默认永不静音。 */
     confirmNeverSilent: boolean;
-    /** 去重窗口（ms，默认 30000）：同会话同类型窗口内合并。 */
+    /** 去重窗口（ms，默认 10000）：同会话同内容窗口内去重（不同样各自响）。 */
     dedupeWindowMs: number;
-    /** 同会话自身事件是否也插播（默认 false = 当前对话自身事件由"叮/叮叮"提示音处理）。 */
+    /** 同会话自身事件是否也插播（默认 false = 当前对话自身事件由"当/当当"提示音处理）。 */
     announceOwnSessions: boolean;
     /** 静音时段（"HH:mm" 24h；空串 = 无；start>end 视为跨夜）。 */
     quietHours: { start: string; end: string };

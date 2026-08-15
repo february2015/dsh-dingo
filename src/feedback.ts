@@ -2,7 +2,7 @@
  * FR-6 全局插播反馈（跨会话通知语音）—— host 决策与编排层。
  *
  * 职责：五事件源订阅与分类 → 提示音 + 播报模板 → 优先级插播队列 →
- * 暂停/恢复当前正文 → 30s 去重 → DND 免打扰（确认类默认永不静音）。
+ * 暂停/恢复当前正文 → 10s 去重 → DND 免打扰（确认类默认永不静音）。
  *
  * ## 事件源（FR-6.1，见 {@link installFeedback} 的接线）
  *
@@ -27,7 +27,7 @@
  *
  * - 去重：同会话同内容事件 10s 窗口去重（窗口可配 `dedupeWindowMs`；
  *   内容指纹 = 摘要文本，不同内容仍各自提示）；
- * - DND：`/voice dnd on` → 任务类（task-done/task-error/normal）入队但**不发声**
+ * - DND：`/dingo dnd on` → 任务类（task-done/task-error/normal）入队但**不发声**
  *   （deferred，关闭后补播）；确认类（need-confirm）默认仍播（`confirmNeverSilent`）；
  * - 静音时段（可配 `quietHours` "HH:mm"）＝自动 DND：任务类只入队不发声，
  *   时段结束后补播。
@@ -40,7 +40,7 @@
  * - 提示音：`playTone` 由宿主接 client（FeedbackCard 轮询 speaking 项播放）；
  * - barge-in 停止钩子：客户端 `/dingo.feedback {action:'interrupt'}`。
  *
- * @module dsh-localvoice/feedback
+ * @module dsh-dingo/feedback
  */
 import type { Context } from '@deepseek-ai/cordis';
 import type { VoiceState } from './types.ts';
@@ -81,9 +81,9 @@ export interface Announcement {
   readonly priority: number;
   /** 派生：FEEDBACK_TONE[category]。 */
   readonly tone: ToneId;
-  /** 最终播报文本（按模板拼好；去重合并时更新）。 */
+  /** 最终播报文本（按模板拼好）。 */
   text: string;
-  /** 去重键：`<sessionId>:<category>`（同会话同类型 30s 窗口）。 */
+  /** 去重键：`<sessionId>:<category>:<内容指纹>`（同会话同内容 10s 窗口；不同样各自响）。 */
   readonly dedupeKey: string;
   /** 事件所属会话 id（UI 卡片点击跳转用；可能缺省）。 */
   readonly sessionId?: string;
@@ -128,7 +128,7 @@ export interface AnnouncementView {
   readonly replayable: boolean;
 }
 
-/** 反馈引擎快照（`/voice.status` 与 `/voice.feedback` 共用）。 */
+/** 反馈引擎快照（`/dingo.feedback {action:'announcements'}` 与 `/dingo status` 共用）。 */
 export interface FeedbackSnapshot {
   readonly enabled: boolean;
   readonly dnd: boolean;
@@ -151,7 +151,7 @@ export interface FeedbackSnapshot {
 export interface FeedbackConfig {
   /** 总开关（false = 事件只忽略，不产生任何插播）。 */
   readonly enabled: boolean;
-  /** DND 免打扰（`/voice dnd on|off`，live 可变）。 */
+  /** DND 免打扰（`/dingo dnd on|off`，live 可变）。 */
   dnd: boolean;
   /** 确认类默认永不静音（FR-6.4）。 */
   readonly confirmNeverSilent: boolean;
@@ -190,7 +190,7 @@ export interface FeedbackAudio {
 export interface FeedbackDeps {
   /** 播报音频端口（dsh-dingo 极简实现；测试 = fake）。 */
   readonly audio: FeedbackAudio;
-  /** 反馈配置（live 读取；dnd 由 /voice dnd 切换）。 */
+  /** 反馈配置（live 读取；dnd 由 /dingo dnd 切换）。 */
   readonly config: FeedbackConfig;
   /** 会话 → 工作区标题解析（缺省经 ctx.apiProxy.workspace.list()，懒缓存）。 */
   readonly resolveWorkspace?: (sessionId: string, cwd?: string) => Promise<string | undefined>;
@@ -304,7 +304,7 @@ export class FeedbackEngine {
     return this.activeSessionId;
   }
 
-  /** 快照（/voice.status 与 /voice.feedback 共用）。 */
+  /** 快照（/dingo.feedback 与 /dingo status 共用）。 */
   snapshot(): FeedbackSnapshot {
     const cfg = this.deps.config;
     return {
@@ -356,7 +356,7 @@ export class FeedbackEngine {
       case 'turn/end': {
         const reason = (event as SessionEventLike & { data?: { reason?: { kind?: string } } }).data?.reason;
         if (reason?.kind !== 'completed') return; // aborted/error/max-tokens 不算完成
-        if (this.isOwnSession(sessionId)) return; // 当前对话自身事件由"当前对话提醒"处理（叮/叮叮）
+        if (this.isOwnSession(sessionId)) return; // 当前对话自身事件由"当前对话提醒"处理（当/当当）
         const text = this.assistantText.get(sessionId) ?? '';
         // 其他对话回复：含疑问/请求确认 → "需回答"（叮叮 2 声），否则 "有回复"（叮 1 声）
         if (isQuestionText(text)) {
@@ -447,7 +447,7 @@ export class FeedbackEngine {
     this.activeSessionId = sessionId === '' ? undefined : sessionId;
   }
 
-  /** `/voice dnd on|off`：切换免打扰（任务类静音、确认类仍播）。 */
+  /** `/dingo dnd on|off`：切换免打扰（任务类静音、确认类仍播）。 */
   setDnd(value: boolean): boolean {
     this.deps.config.dnd = value;
     if (!value) {
@@ -475,7 +475,7 @@ export class FeedbackEngine {
   }
 
   /**
-   * 客户端上报：当前插播已播完（`/voice.feedback {action:'spoken'}`）。
+   * 客户端上报：当前插播已播完（`/dingo.feedback {action:'spoken'}`）。
    * 引擎据此恢复正文（若插播前暂停过）并播下一条。
    */
   completeSpeech(itemId?: string): void {
@@ -487,7 +487,7 @@ export class FeedbackEngine {
   }
 
   /**
-   * barge-in 停止钩子（T-6 interrupt 调用；也可由客户端 `/voice.feedback
+   * barge-in 停止钩子（T-6 interrupt 调用；也可由客户端 `/dingo.feedback
    * {action:'interrupt'}` 触发）：停止当前插播，该项由 tick 放回队列头
    * （保留可重播，冷却后重播）。
    */
@@ -857,7 +857,7 @@ export class FeedbackInterruptedError extends Error {
  * - state() → `machine.current`。
  *
  * 播完信号不在本适配内（T-5 状态机 speak 为 fire-and-forget）：生产装配在
- * index.ts 把客户端 `/voice.feedback {action:'spoken'}` 接到引擎
+ * index.ts 把客户端 `/dingo.feedback {action:'spoken'}` 接到引擎
  * `completeSpeech()`；客户端播完即上报。测试注入 fake audio 或显式 completeSpeech。
  */
 export interface TonePlayer {
@@ -904,13 +904,13 @@ export function installFeedback(
     ctx.on('session/event', (session: SessionLike, event: SessionEventLike) => {
       engine.handleSessionEvent(session, event);
     }),
-  'dsh-localvoice: feedback session/event');
+  'dsh-dingo: feedback session/event');
 
   // 2) jobs 域 settled（守卫缺失：无 ctx.jobs 的宿主不接 jobs 源）
   const jobs = ctx.get('jobs') as { onJobDone?: (listener: (snapshot: JobSnapshotLike) => void) => () => void } | undefined;
   if (jobs?.onJobDone) {
     ctx.effect(() => jobs.onJobDone!((snapshot) => engine.handleJobSettled(snapshot)),
-      'dsh-localvoice: feedback jobs');
+      'dsh-dingo: feedback jobs');
   } else {
     logger('[feedback] ctx.jobs 不可用 — jobs 事件源跳过');
   }
@@ -927,7 +927,7 @@ export function installFeedback(
     };
     ctx.effect(() => () => {
       questions.ask = originalAsk;
-    }, 'dsh-localvoice: feedback questions wrap');
+    }, 'dsh-dingo: feedback questions wrap');
   } else {
     logger('[feedback] ctx.userQuestions 不可用 — questions 事件源跳过');
   }

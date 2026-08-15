@@ -1,28 +1,28 @@
 /**
  * FR-6 插播通知卡片（client，可选 UI 面）。
  *
- * 职责（与 host 反馈引擎 {@link dsh-localvoice/feedback} 配套）：
- * - 轮询 `/voice.feedback {action:'announcements'}` 取插播队列快照，渲染
+ * 职责（与 host 反馈引擎 {@link dsh-dingo/feedback} 配套）：
+ * - 轮询 `/dingo.feedback {action:'announcements'}` 取插播队列快照，渲染
  *   全局 toast（分类徽标 + 播报文本 + 工作区/会话名）；
  * - 发现新「speaking」项 → 播放对应内置提示音（assets/ 生成的 data URL，
  *   **不占用 TTS 合成通道**，FR-6.2）；
- * - 「spoken」上报：speaking 项从快照消失 → 调 `/voice.feedback
+ * - 「spoken」上报：speaking 项从快照消失 → 调 `/dingo.feedback
  *   {action:'spoken', id}`，host 据此恢复正文并播下一条（轮询启发式；
  *   T-8 接 client Playback 播完钩子后精确化）；
  * - 关闭（dismiss）/ 重播（replay）按钮；
  * - 本组件挂载于 `shell.overlay`（root 作用域 list 槽，浮层不挡交互）。
  *
  * 注意：播报文本的语音（TTS）由 host 侧 `state.speak` 驱动走同一
- * `/voice.pull` 通道，本卡片只做视觉 + 提示音 + 完成/打断上报。
+ * `/dingo.pull` 通道，本卡片只做视觉 + 提示音 + 完成/打断上报。
  *
- * @module dsh-localvoice/client/FeedbackCard
+ * @module dsh-dingo/client/FeedbackCard
  */
 import { useEffect, useRef, useState } from 'react'
 import type { SessionListState } from '@deepseek-ai/dsh-client-runtime/client'
 import type { RpcCall } from './rpc.ts'
 import { resolveToneUrl, type ToneStyle } from './tones.ts'
 
-/** `/voice.feedback` 返回的插播项视图（host 形状的子集）。 */
+/** `/dingo.feedback` 返回的插播项视图（host 形状的子集）。 */
 export interface AnnouncementView {
   id: string
   category: 'need-confirm' | 'task-done' | 'task-error' | 'normal'
@@ -41,7 +41,7 @@ export interface AnnouncementView {
   replayable: boolean
 }
 
-/** `/voice.feedback {action:'announcements'}` 响应快照。 */
+/** `/dingo.feedback {action:'announcements'}` 响应快照。 */
 export interface FeedbackSnapshotView {
   enabled: boolean
   dnd: boolean
@@ -156,7 +156,7 @@ function ensureHoverStyles(): void {
  */
 export function FeedbackCard({ rpc, openSession: openTarget, useSessions }: FeedbackCardProps): JSX.Element | null {
   const [snapshot, setSnapshot] = useState<FeedbackSnapshotView | undefined>(undefined)
-  /** 当前打开的对话（框架注入；上报 host 用于"当前对话叮/叮叮"判定）。 */
+  /** 当前打开的对话（框架注入；上报 host 用于"当前对话当/当当"判定）。 */
   const currentSessionId = useSessions?.((s) => s.current)
   /** 各会话 displayTitle（与侧边栏同一数据源；host 标题缺失时卡片兜底显示）。 */
   const sessionTitles = useSessions?.((s) => s.byId)
@@ -264,7 +264,7 @@ export function FeedbackCard({ rpc, openSession: openTarget, useSessions }: Feed
     }
   }, [rpc])
 
-  // 上报"当前查看的对话"：host 判定当前对话回复 → 叮/叮叮（crisp 档"当"），
+  // 上报"当前查看的对话"：host 判定当前对话回复 → 当/当当（crisp 档），
   // 其他对话 → 另一声音（soft 档"叮"）+ 卡片。切换对话时实时上报。
   useEffect(() => {
     void rpc.call('/dingo', 'set-current-session', { sessionId: currentSessionId }).catch(() => {})

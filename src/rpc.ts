@@ -4,12 +4,12 @@
  * | endpoint | 用途 |
  * |----------|------|
  * | feedback | 插播队列快照 / 关闭 / 重播 / 播完上报 / 打断 / 上报当前会话 |
- * | set-current-session | 客户端上报"当前查看的对话"（叮/叮叮 判定用） |
+ * | set-current-session | 客户端上报"当前查看的对话"（当/当当 判定用） |
  *
  * 跳转说明：卡片点击跳转改由 client 侧 `sessions.open` 直接完成（与侧边栏
  * 点击同一入口），host 端不再需要 /dingo.switch 解析工作区（已移除）。
  *
- * 复用自 dsh-localvoice（/voice 通道），本地 TTS/ASR 全部移除。
+ * 复用自 dsh-localvoice（原 /voice 通道改造），本地 TTS/ASR 全部移除。
  *
  * @module dsh-dingo/rpc
  */
@@ -48,7 +48,7 @@ export function installDingoRpc(ctx: Context, deps: DingoRpcDeps, authority: Cha
           return handleFeedbackEndpoint(deps.feedback, payload);
         }
         case 'set-current-session': {
-          // 客户端上报"当前查看的对话"：当前对话回复 → 叮/叮叮（crisp 档"当"），
+          // 客户端上报"当前查看的对话"：当前对话回复 → 当/当当（crisp 档），
           // 其他对话 → 另一声音（soft 档"叮"）+ 卡片；own 判定也用它。
           const record = (typeof payload === 'object' && payload !== null ? payload : {}) as Record<string, unknown>;
           const sid = typeof record.sessionId === 'string' && record.sessionId !== '' ? record.sessionId : undefined;
