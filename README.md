@@ -91,8 +91,6 @@ npm test            # vitest
 npm run verify      # typecheck + test + build
 ```
 
-代码复用自 [dsh-localvoice](https://github.com/robin-my/dsh-localvoice)（提醒/卡片部分），剥除了 ASR/TTS/语音链路。
-
 ## License
 
 MIT

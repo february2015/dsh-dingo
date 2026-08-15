@@ -9,8 +9,6 @@
  * 跳转说明：卡片点击跳转改由 client 侧 `sessions.open` 直接完成（与侧边栏
  * 点击同一入口），host 端不再需要 /dingo.switch 解析工作区（已移除）。
  *
- * 复用自 dsh-localvoice（原 /voice 通道改造），本地 TTS/ASR 全部移除。
- *
  * @module dsh-dingo/rpc
  */
 import type { Context } from '@deepseek-ai/cordis';
