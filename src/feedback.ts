@@ -201,6 +201,8 @@ export interface FeedbackDeps {
   readonly resolveSessionTitle?: (sessionId: string) => Promise<string | undefined>;
   /** 日志（缺省静默）。 */
   readonly logger?: (message: string) => void;
+  /** 新提醒项入队（非去重命中）后回调（host 用它发系统级通知）。 */
+  readonly onEnqueue?: (item: AnnouncementView) => void;
   /** 可注入时钟（测试用）。 */
   readonly now?: () => number;
   /** 测试辅助：speak 后自动完成（跳过显式 completeSpeech）。 */
@@ -591,6 +593,7 @@ export class FeedbackEngine {
     };
     item.text = this.renderText(item, request.summary);
     this.insert(item);
+    this.deps.onEnqueue?.(toView(item));
     this.scheduleRecheck();
     this.deps.logger?.(`[feedback] enqueue ${request.category} (${request.source}): ${item.text}`);
     void this.tick();
@@ -884,6 +887,8 @@ export interface FeedbackInstallOptions {
   readonly logger?: (message: string) => void;
   readonly resolveWorkspace?: (sessionId: string, cwd?: string) => Promise<string | undefined>;
   readonly resolveSessionTitle?: (sessionId: string) => Promise<string | undefined>;
+  /** 新提醒项入队后回调（host 发系统级通知）。 */
+  readonly onEnqueue?: (item: AnnouncementView) => void;
 }
 
 export function installFeedback(
@@ -896,6 +901,7 @@ export function installFeedback(
     logger: options.logger,
     resolveWorkspace: options.resolveWorkspace ?? defaultWorkspaceResolver(ctx),
     resolveSessionTitle: options.resolveSessionTitle ?? defaultSessionTitleResolver(ctx),
+    onEnqueue: options.onEnqueue,
   });
   const logger = options.logger ?? (() => {});
 

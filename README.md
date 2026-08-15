@@ -41,6 +41,12 @@ Current conversation replies → **dang / dang-dang** (crisp tone set); other co
 - Configurable quiet hours (`quietHours` "HH:mm", overnight supported) — task-class reminders queue silently and play after the window ends;
 - `/dingo off` disables all reminders.
 
+**System notifications** (macOS Notification Center / Windows toast, optional):
+- When another conversation needs your answer / replies / fails, a **system-level notification** is sent in addition to the in-browser card — so you notice even while working in another app;
+- **Click the notification → jumps straight to that conversation** (deep link `?dingOpen=`);
+- Suppressed while the DSH Web UI is visible in the foreground (the in-browser tones/cards are enough); sent when the page is in the background or not open;
+- macOS requires `brew install terminal-notifier` once; Windows uses built-in PowerShell (scripts under `scripts/`).
+
 ---
 
 ## Install
@@ -66,6 +72,8 @@ Overridable in the profile's `cordis.patch.yml` or plugin config:
       dnd: false
       dedupeWindowMs: 10000  # same-conversation same-content dedup window (same reminder won't repeat, different ones ring)
       quietHours: { start: '', end: '' }
+    # systemNotify: true       # system notifications for other conversations (default on)
+    # systemNotifyBaseUrl: ''  # deep-link base URL (default http://127.0.0.1:3080)
 ```
 
 ## Commands

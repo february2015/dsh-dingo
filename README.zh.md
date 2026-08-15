@@ -41,6 +41,12 @@
 - 可配静音时段（`quietHours` "HH:mm"，支持跨夜）——任务类只入队不发声，结束后补播；
 - `/dingo off` 一键关闭全部提醒。
 
+**系统级通知**（macOS 通知中心 / Windows toast，可选）：
+- 其他对话**需回答 / 有回复 / 任务失败**时，除浏览器内卡片外再发一条**系统通知**——切到别的应用也不错过；
+- **点击通知 → 直达对应会话**（深链 `?dingOpen=`，与系统通知同款格式）；
+- **DSH Web UI 前台可见时不发**（浏览器内叮当音 + 卡片已够）；页面在后台或未打开时发；
+- macOS 需一次性 `brew install terminal-notifier`；Windows 用系统自带 PowerShell（脚本在 `scripts/`）。
+
 ---
 
 ## 安装
@@ -66,6 +72,8 @@ profile 的 `cordis.patch.yml` 或插件配置里可覆盖：
       dnd: false
       dedupeWindowMs: 10000  # 同会话同内容去重窗口（同样提示不重复、不同样各自响）
       quietHours: { start: '', end: '' }
+    # systemNotify: true       # 其他对话的系统级通知（默认开）
+    # systemNotifyBaseUrl: ''  # 深链基地址（默认 http://127.0.0.1:3080）
 ```
 
 ## 命令

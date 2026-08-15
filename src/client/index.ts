@@ -17,6 +17,7 @@ import type {} from '@deepseek-ai/dsh-client-ui-slots'
 // shell.overlay 槽位由 dsh-client-ui-layout 声明；type-only 导入加载 SlotMap 增强
 import type {} from '@deepseek-ai/dsh-client-ui-layout/client'
 import { FeedbackCard, type FeedbackCardProps } from './FeedbackCard.tsx'
+import { installDeepLink } from './deep-link.ts'
 
 /** 客户端插件名（web server 按此 id 注册/卸载）。 */
 export const name = 'dsh-dingo-client'
@@ -37,6 +38,40 @@ export function apply(ctx: ClientContext): void {
   // 会话跳转服务：卡片点击 → 直接打开对应对话（与侧边栏点击同一入口）。
   // 注意：open 要求会话在列表内；未知/已删除会话会抛错，这里静默忽略。
   const sessions = ctx.get('sessions') as { open(id: string): void } | undefined
+
+  // 系统通知深链：dingOpen 参数 + 标签页复用（已有 DSH 标签页接管跳转并聚焦）
+  if (sessions !== undefined) {
+    ctx.effect(() => installDeepLink({
+      openSession: (sessionId: string) => {
+        try {
+          sessions.open(sessionId)
+        } catch {
+          // 会话已不在列表（删除/归档）→ 静默
+        }
+      },
+      channel: typeof BroadcastChannel !== 'undefined' ? new BroadcastChannel('dsh-dingo-deeplink') : undefined,
+      closeWindow: () => window.close(),
+    }), 'dsh-dingo: deeplink')
+  }
+
+  // 上报 DSH Web UI 前台可见性：host 据此决定是否发系统通知
+  // （可见 → 浏览器内提醒已够；不可见/未开 → 系统通知）。
+  ctx.effect(() => {
+    if (typeof document === 'undefined') return () => {}
+    const report = (): void => {
+      const visible = document.visibilityState === 'visible' && document.hasFocus()
+      void rpc.call('/dingo', 'set-visibility', { visible }).catch(() => {})
+    }
+    report()
+    document.addEventListener('visibilitychange', report)
+    window.addEventListener('focus', report)
+    window.addEventListener('blur', report)
+    return () => {
+      document.removeEventListener('visibilitychange', report)
+      window.removeEventListener('focus', report)
+      window.removeEventListener('blur', report)
+    }
+  }, 'dsh-dingo: visibility report')
 
   ctx.effect(() => {
     return ctx.slots.inject('shell.overlay', () => ctx.slots.register({

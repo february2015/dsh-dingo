@@ -5,6 +5,7 @@
  * |----------|------|
  * | feedback | 插播队列快照 / 关闭 / 重播 / 播完上报 / 打断 / 上报当前会话 |
  * | set-current-session | 客户端上报"当前查看的对话"（当/当当 判定用） |
+ * | set-visibility | 客户端上报"DSH Web UI 前台可见性"（决定是否发系统通知） |
  *
  * 跳转说明：卡片点击跳转改由 client 侧 `sessions.open` 直接完成（与侧边栏
  * 点击同一入口），host 端不再需要 /dingo.switch 解析工作区（已移除）。
@@ -32,6 +33,8 @@ export interface DingoRpcDeps {
   readonly feedback: FeedbackEngine;
   /** 设置"当前查看会话"（客户端上报；广播/引擎 own 判定用）。 */
   readonly setCurrentSessionId?: (id: string | undefined) => void;
+  /** 上报"DSH Web UI 是否前台可见"（决定是否发系统通知）。 */
+  readonly setWebVisible?: (visible: boolean) => void;
 }
 
 /** 注册 `/dingo` RPC 通道（可逆 effect；unload 时自动卸载）。 */
@@ -52,6 +55,13 @@ export function installDingoRpc(ctx: Context, deps: DingoRpcDeps, authority: Cha
           const sid = typeof record.sessionId === 'string' && record.sessionId !== '' ? record.sessionId : undefined;
           deps.setCurrentSessionId?.(sid);
           return { ok: true, value: { current: sid ?? null } };
+        }
+        case 'set-visibility': {
+          // 客户端上报 DSH Web UI 前台可见性：可见时浏览器内提醒已够，
+          // 不发系统通知；不可见/未开 → 发系统通知。
+          const record = (typeof payload === 'object' && payload !== null ? payload : {}) as Record<string, unknown>;
+          deps.setWebVisible?.(record.visible === true);
+          return { ok: true, value: { visible: record.visible === true } };
         }
         default:
           return {
