@@ -5,7 +5,7 @@
  * 其他对话回复：另一套声音（soft 档"叮"）同样 1 声/2 声区分 + 右上角小卡片
  * （工作区 + 对话标题 + 状态图标），点击卡片直达对应对话。
  *
- * 无 ASR、无 TTS：全部逻辑 = 会话事件 → 判定级别（isQuestionText）→
+ * 全部逻辑 = 会话事件 → 判定级别（isQuestionText）→
  * feedback 队列 → client 播放提示音 + 渲染卡片。
  *
  * @module dsh-dingo

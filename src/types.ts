@@ -2,7 +2,6 @@
  * dsh-dingo — 共享类型（host/client 双半共用）。
  *
  * 声音提醒插件：当前对话回复当/当当（crisp 档）区分，其他对话叮/叮叮（soft 档）+ 右上角卡片直达。
- * 无 ASR、无 TTS。
  *
  * @module dsh-dingo/types
  */
