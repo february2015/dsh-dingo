@@ -25,7 +25,8 @@
  *
  * ## 去重与 DND（FR-6.3 / FR-6.4）
  *
- * - 去重：同会话同类型事件 30s 窗口合并（窗口可配 `dedupeWindowMs`）；
+ * - 去重：同会话同内容事件 10s 窗口去重（窗口可配 `dedupeWindowMs`；
+ *   内容指纹 = 摘要文本，不同内容仍各自提示）；
  * - DND：`/voice dnd on` → 任务类（task-done/task-error/normal）入队但**不发声**
  *   （deferred，关闭后补播）；确认类（need-confirm）默认仍播（`confirmNeverSilent`）；
  * - 静音时段（可配 `quietHours` "HH:mm"）＝自动 DND：任务类只入队不发声，
@@ -154,7 +155,7 @@ export interface FeedbackConfig {
   dnd: boolean;
   /** 确认类默认永不静音（FR-6.4）。 */
   readonly confirmNeverSilent: boolean;
-  /** 去重窗口（ms，默认 30000）。 */
+  /** 去重窗口（ms，默认 10000：同会话同内容 10s 内不重复提示）。 */
   readonly dedupeWindowMs: number;
   /** 同会话自身事件是否也插播（FR-6.3，默认 false = 不插播）。 */
   readonly announceOwnSessions?: boolean;
@@ -502,14 +503,16 @@ export class FeedbackEngine {
 
   // ── 内部：分类 → 去重 → 入队 ──
 
-  private async announceTaskDone(sessionId: string | undefined, cwd: string | undefined, _replyText: string, source: string): Promise<void> {
+  private async announceTaskDone(sessionId: string | undefined, cwd: string | undefined, replyText: string, source: string): Promise<void> {
     const workspaceTitle = await this.resolveWorkspaceTitle(sessionId, cwd);
     const sessionTitle = sessionId ? await this.resolveSessionTitleCache(sessionId) : undefined;
     this.enqueue({
       category: 'task-done',
       workspaceTitle,
       sessionTitle,
-      summary: '',
+      // 内容指纹：用回复文本区分"不同任务完成"（播报文本不受影响——
+      // task-done 只播"有回复"，不读 summary）
+      summary: replyText,
       source,
       sessionId,
     });
@@ -556,15 +559,11 @@ export class FeedbackEngine {
     sessionId?: string;
   }): void {
     const now = this.now();
-    const key = dedupeKey(request.sessionId, request.category);
-    // 30s 去重：同会话同类型窗口内 → 合并（更新已排队项的文本/时间）
+    const key = dedupeKey(request.sessionId, request.category, request.summary);
+    // 10s 去重：同会话同内容窗口内 → 吞掉（不重复提示；窗口顺延）。
+    // 不同内容（不同摘要）不受影响，各自提示。
     if (this.isDuplicate(key, now)) {
-      const existing = this.queue.find((item) => item.dedupeKey === key && item.state !== 'spoken');
-      if (existing) {
-        existing.text = this.renderText(existing, request.summary);
-        existing.replayAt = now;
-        this.recent.set(key, now);
-      }
+      this.recent.set(key, now); // 滑动窗口：连续轰炸时窗口顺延
       return;
     }
     this.recent.set(key, now);
@@ -969,8 +968,10 @@ export interface JobSnapshotLike {
   readonly id?: string;
 }
 
-function dedupeKey(sessionId: string | undefined, category: string): string {
-  return `${sessionId ?? '*'}:${category}`;
+function dedupeKey(sessionId: string | undefined, category: string, summary: string): string {
+  // 作用域 = 会话（每对话各自计时）；内容指纹 = 摘要文本（同样提示不重复，
+  // 不同提示各自响）。category 保留：不同提醒类型不算"同样"。
+  return `${sessionId ?? '*'}:${category}:${summary.trim()}`;
 }
 
 function toView(item: Announcement): AnnouncementView {

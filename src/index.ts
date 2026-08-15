@@ -37,7 +37,7 @@ export const Config = z.object({
     enabled: z.boolean().default(true),
     dnd: z.boolean().default(false),
     confirmNeverSilent: z.boolean().default(true),
-    dedupeWindowMs: z.number().default(30000),
+    dedupeWindowMs: z.number().default(10000),
     // 当前对话自身事件默认不由插播队列处理（当前对话回复走"叮/叮叮"提示音，
     // 由 apply 内的 current-reply 订阅直接入队 own 提醒）
     announceOwnSessions: z.boolean().default(false),

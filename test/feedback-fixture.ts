@@ -37,13 +37,13 @@ export class FakeAudio implements FeedbackAudio {
   }
 }
 
-/** 最小反馈配置（默认：启用、无 DND、去重 30s）。 */
+/** 最小反馈配置（默认：启用、无 DND、去重 10s）。 */
 export function feedbackConfig(overrides: Partial<FeedbackConfig> = {}): FeedbackConfig {
   return {
     enabled: true,
     dnd: false,
     confirmNeverSilent: true,
-    dedupeWindowMs: 30_000,
+    dedupeWindowMs: 10_000,
     announceOwnSessions: false,
     quietHours: { start: '', end: '' },
     toneStyle: 'soft',

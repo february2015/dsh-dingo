@@ -132,13 +132,58 @@ describe('DND 与去重', () => {
     expect(audio.spokenTexts[0]).toContain('需回答')
   })
 
-  it('同会话同类型 30s 去重', async () => {
+  it('同会话同内容 10s 内去重（同样提示只响一次）', async () => {
     const { engine, audio } = build()
-    engine.handleSessionEvent({ id: 'sess-b' }, sessionEvent('turn/end', { reason: { kind: 'completed' } }))
+    const reply = (text: string): void => {
+      engine.handleSessionEvent({ id: 'sess-b' }, sessionEvent('assistant/message', undefined, { message: { content: text } }))
+      engine.handleSessionEvent({ id: 'sess-b' }, sessionEvent('turn/end', { reason: { kind: 'completed' } }))
+    }
+    reply('构建通过，测试全绿')
     await flush()
-    engine.handleSessionEvent({ id: 'sess-b' }, sessionEvent('turn/end', { reason: { kind: 'completed' } }))
+    reply('构建通过，测试全绿') // 同样提示
     await flush()
     expect(audio.spokenTexts).toHaveLength(1)
+  })
+
+  it('不同内容 → 各自提示（同类型不互相吞）', async () => {
+    const { engine, audio } = build()
+    const reply = (text: string): void => {
+      engine.handleSessionEvent({ id: 'sess-b' }, sessionEvent('assistant/message', undefined, { message: { content: text } }))
+      engine.handleSessionEvent({ id: 'sess-b' }, sessionEvent('turn/end', { reason: { kind: 'completed' } }))
+    }
+    reply('构建通过，测试全绿')
+    await flush()
+    reply('部署已完成') // 不同样的提示
+    await flush()
+    expect(audio.spokenTexts).toHaveLength(2)
+  })
+
+  it('每个对话各自计时（同内容不同会话都提示）', async () => {
+    const { engine, audio } = build()
+    const reply = (sessionId: string, text: string): void => {
+      engine.handleSessionEvent({ id: sessionId }, sessionEvent('assistant/message', undefined, { message: { content: text } }))
+      engine.handleSessionEvent({ id: sessionId }, sessionEvent('turn/end', { reason: { kind: 'completed' } }))
+    }
+    reply('sess-a', '构建通过，测试全绿')
+    await flush()
+    reply('sess-b', '构建通过，测试全绿') // 另一个对话的同内容
+    await flush()
+    expect(audio.spokenTexts).toHaveLength(2)
+  })
+
+  it('窗口过期后（>10s）同内容可再次提示', async () => {
+    let now = 1000
+    const { engine, audio } = build({ now: () => now })
+    const reply = (): void => {
+      engine.handleSessionEvent({ id: 'sess-b' }, sessionEvent('assistant/message', undefined, { message: { content: '构建通过，测试全绿' } }))
+      engine.handleSessionEvent({ id: 'sess-b' }, sessionEvent('turn/end', { reason: { kind: 'completed' } }))
+    }
+    reply()
+    await flush()
+    now += 11_000 // 超过 10s 窗口
+    reply()
+    await flush()
+    expect(audio.spokenTexts).toHaveLength(2)
   })
 })
 
