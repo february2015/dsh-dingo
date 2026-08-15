@@ -43,9 +43,11 @@ Current conversation replies → **dang / dang-dang** (crisp tone set); other co
 
 **System notifications** (macOS Notification Center / Windows toast, optional):
 - When another conversation needs your answer / replies / fails, a **system-level notification** is sent in addition to the in-browser card — so you notice even while working in another app;
-- **Click the notification → jumps straight to that conversation** (deep link `?dingOpen=`);
+- **Two channels, distinct jobs**: the system notification tells you *something happened*; the in-browser card (always visible while the Web UI is open) tells you *which conversation* — click it to jump straight there;
+- **Windows**: clicking the notification itself also jumps straight to the conversation (deep link `?dingOpen=`);
+- **macOS**: the notification is a reminder only (no click callback — a macOS system limit; the in-browser card handles the jump);
 - Suppressed while the DSH Web UI is visible in the foreground (the in-browser tones/cards are enough); sent when the page is in the background or not open;
-- macOS requires `brew install terminal-notifier` once; Windows uses built-in PowerShell (scripts under `scripts/`).
+- **Zero setup**: macOS uses built-in `osascript`; Windows uses built-in PowerShell (scripts under `scripts/`).
 
 ---
 
@@ -63,10 +65,10 @@ dsh plugin --profile web add dsh-dingo
 
 ### System-notification prerequisites (optional feature)
 
-The optional system notifications (macOS Notification Center / Windows toast) need:
+The optional system notifications (macOS Notification Center / Windows toast) need **no installation** on either platform:
 
-- **macOS**: install once — `brew install terminal-notifier`. Without it, system notifications are skipped silently and only the in-browser cards/tone work.
-- **Windows**: nothing to install — uses built-in PowerShell (`scripts/notify.ps1` + `scripts/toast-activate.ps1`).
+- **macOS**: uses built-in `osascript` (`display notification`).
+- **Windows**: uses built-in PowerShell (`scripts/notify.ps1` + `scripts/toast-activate.ps1`).
 
 Disable anytime with `systemNotify: false` (see config below).
 

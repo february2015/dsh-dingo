@@ -2,7 +2,8 @@
  * dsh-dingo client — 会话深链 + 标签页复用。
  *
  * 系统通知点击 → 打开 `<webui>/?dingOpen=<base64url(sessionId)>`（dsh-ding 同款
- * 格式，Windows toast / macOS terminal-notifier 共用）。本模块负责：
+ * 格式，Windows toast 点击直达用；macOS 系统通知无点击回调，不走深链）。
+ * 本模块负责：
  * 1. 解析 URL `dingOpen` 参数（base64url → sessionId）；
  * 2. 标签页协作（BroadcastChannel）：新标签页加载深链时广播 hello，
  *    已有 DSH 标签页收到后 `sessions.open` + `window.focus()` 并回 ack，

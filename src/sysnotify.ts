@@ -2,14 +2,18 @@
  * dsh-dingo 系统级通知（host 侧）。
  *
  * 平台后端：
- * - macOS：terminal-notifier（`brew install terminal-notifier` 一次）；
- *   支持 `-open <url>` 点击直达、`-group <sessionId>` 按会话分组去重
- *   （同会话新通知自动替换旧通知，不刷屏）；
- * - Windows：`scripts/notify.ps1`（PowerShell toast，系统自带），点击打开深链 URL；
+ * - macOS：osascript `display notification`（系统内置，零依赖）。
+ *   注意：新版 macOS（26.x）已移除 terminal-notifier 依赖的 NSUserNotification
+ *   API（实测 `terminal-notifier` 发送被系统丢弃、`-list` 为空），且 osascript
+ *   通知**没有点击回调**——macOS 系统通知仅作"切走应用时的提醒"，直达走
+ *   浏览器内卡片（sessions.open）；
+ * - Windows：`scripts/notify.ps1` + `scripts/toast-activate.ps1`（PowerShell
+ *   toast，抄自 dsh-ding 改造），点击通知直达会话（深链 `?dingOpen=`）；
  * - 其他平台：no-op + logger（提示不支持）。
  *
- * 深链 URL：`<webuiBaseUrl>/?session=<sessionId>` —— client 解析该参数后
- * `sessions.open` 直达对应会话（与侧边栏点击同一入口）。
+ * 深链 URL：`<webuiBaseUrl>/?dingOpen=<base64url(sessionId)>`（dsh-ding 同款格式；
+ * base64url 只含安全字符，Windows toast launch / 命令行 / URL 均无转义问题）。
+ * client 解析 `dingOpen` 后 sessions.open 直达。
  *
  * @module dsh-dingo/sysnotify
  */
@@ -22,7 +26,7 @@ export interface SystemNotifyOptions {
   title?: string;
   /** 通知正文（工作区/会话摘要）。 */
   message: string;
-  /** 目标会话 id：点击通知直达该会话；同时作 macOS 分组键。 */
+  /** 目标会话 id：Windows 点击通知直达用；macOS 无点击回调（仅随通知内容提示）。 */
   sessionId?: string;
   /** DSH WebUI 基地址（如 http://127.0.0.1:3080）。 */
   webuiBaseUrl: string;
@@ -60,23 +64,18 @@ export function sendSystemNotification(options: SystemNotifyOptions): void {
   }
 }
 
-/** macOS：terminal-notifier（通知中心原生 toast，点击直达深链 URL）。 */
+/** macOS：osascript `display notification`（系统内置；无点击回调，仅提醒）。 */
 function sendMacNotification(options: SystemNotifyOptions): void {
   const log = options.logger ?? (() => {});
-  const args = ['-title', options.title ?? 'DSH 提醒', '-message', options.message];
-  if (options.sessionId !== undefined && options.sessionId !== '') {
-    args.push('-group', `dsh-dingo:${options.sessionId}`, '-open', deepLinkUrl(options.webuiBaseUrl, options.sessionId));
-  }
-  const child = spawn('terminal-notifier', args, { stdio: 'ignore' });
+  const title = options.title ?? 'DSH 提醒';
+  const esc = (s: string): string => s.replace(/\\/g, '\\\\').replace(/"/g, '\\"');
+  const script = `display notification "${esc(options.message)}" with title "${esc(title)}" sound name "Glass"`;
+  const child = spawn('osascript', ['-e', script], { stdio: 'ignore' });
   child.on('error', (error: NodeJS.ErrnoException) => {
-    if (error.code === 'ENOENT') {
-      log('[dingo-sysnotify] 未找到 terminal-notifier，请先安装：brew install terminal-notifier');
-    } else {
-      log(`[dingo-sysnotify] terminal-notifier 启动失败: ${error.message}`);
-    }
+    log(`[dingo-sysnotify] osascript 启动失败: ${error.message}`);
   });
   child.on('exit', (code) => {
-    if (code !== 0 && code !== null) log(`[dingo-sysnotify] terminal-notifier 退出码 ${code}`);
+    if (code !== 0 && code !== null) log(`[dingo-sysnotify] osascript 退出码 ${code}`);
   });
 }
 

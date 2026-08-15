@@ -43,9 +43,11 @@
 
 **系统级通知**（macOS 通知中心 / Windows toast，可选）：
 - 其他对话**需回答 / 有回复 / 任务失败**时，除浏览器内卡片外再发一条**系统通知**——切到别的应用也不错过；
-- **点击通知 → 直达对应会话**（深链 `?dingOpen=`，与系统通知同款格式）；
+- **双通道、各司其职**：系统通知告诉你"有动静"；浏览器内卡片（DSH 界面开着就一直有）告诉你"是哪个对话"——点卡片直达；
+- **Windows**：点击系统通知本身也可直达对应会话（深链 `?dingOpen=`）；
+- **macOS**：系统通知仅作提醒（无点击回调，macOS 系统限制；直达由浏览器内卡片完成）；
 - **DSH Web UI 前台可见时不发**（浏览器内叮当音 + 卡片已够）；页面在后台或未打开时发；
-- macOS 需一次性 `brew install terminal-notifier`；Windows 用系统自带 PowerShell（脚本在 `scripts/`）。
+- **零安装**：macOS 用系统内置 `osascript`；Windows 用系统自带 PowerShell（脚本在 `scripts/`）。
 
 ---
 
@@ -63,10 +65,10 @@ dsh plugin --profile web add dsh-dingo
 
 ### 系统通知前置要求（可选功能）
 
-系统级通知（macOS 通知中心 / Windows toast）需要：
+系统级通知（macOS 通知中心 / Windows toast）**两个平台都无需安装**：
 
-- **macOS**：一次性安装 `brew install terminal-notifier`。未安装时系统通知静默跳过，仅保留浏览器内卡片/提示音。
-- **Windows**：无需安装，用系统自带 PowerShell（`scripts/notify.ps1` + `scripts/toast-activate.ps1`）。
+- **macOS**：用系统内置 `osascript`（`display notification`）。
+- **Windows**：用系统自带 PowerShell（`scripts/notify.ps1` + `scripts/toast-activate.ps1`）。
 
 随时可用 `systemNotify: false` 关闭（见下方配置）。
 
