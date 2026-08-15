@@ -112,7 +112,6 @@ export function apply(ctx: Context, config: unknown): void {
       currentSessionId = id;
       feedback.setActiveSession(id);
     },
-    apiProxy: (ctx as unknown as { apiProxy?: unknown }).apiProxy,
   }, cfg.channelAuthority as ChannelAuthority);
 
   registerDingoCommand(ctx, {

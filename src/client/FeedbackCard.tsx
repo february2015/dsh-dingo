@@ -111,9 +111,11 @@ function CategoryIcon({ category }: { category: AnnouncementView['category'] }):
   }
 }
 
-/** FeedbackCard 注入面：/dingo RPC 调用器 + 当前会话读取（框架注入）。 */
+/** FeedbackCard 注入面：/dingo RPC 调用器 + 会话跳转 + 当前会话读取（框架注入）。 */
 export interface FeedbackCardProps {
   rpc: RpcCall
+  /** 打开指定会话（卡片点击跳转；由 apply 注入，内部走 sessions.open）。 */
+  openSession?: (sessionId: string) => void
   /** 框架标准钩子：读取全局会话列表快照（current = 当前打开的对话）。 */
   useSessions?: (selector: (s: { current?: string }) => string | undefined) => string | undefined
 }
@@ -145,7 +147,7 @@ function ensureHoverStyles(): void {
  * 插播通知卡片：全局 toast 浮层（注册进 `shell.overlay`）。
  * 视觉层 + 提示音 + spoken 上报；host 决策层（队列/去重/DND）不动。
  */
-export function FeedbackCard({ rpc, useSessions }: FeedbackCardProps): JSX.Element | null {
+export function FeedbackCard({ rpc, openSession: openTarget, useSessions }: FeedbackCardProps): JSX.Element | null {
   const [snapshot, setSnapshot] = useState<FeedbackSnapshotView | undefined>(undefined)
   /** 当前打开的对话（框架注入；上报 host 用于"当前对话叮/叮叮"判定）。 */
   const currentSessionId = useSessions?.((s) => s.current)
@@ -226,13 +228,15 @@ export function FeedbackCard({ rpc, useSessions }: FeedbackCardProps): JSX.Eleme
     } catch {
       // noop
     }
-    if (!drag.moved) openSession(item)
+    if (!drag.moved) handleOpenSession(item)
   }
 
   /** 点击卡片本体 → 跳到对应对话（无 sessionId 的卡片不可跳转）。 */
-  const openSession = (item: AnnouncementView): void => {
+  const handleOpenSession = (item: AnnouncementView): void => {
     if (item.sessionId === undefined || item.sessionId === '') return
-    void rpc.call('/dingo', 'switch', { sessionId: item.sessionId })
+    // 跳转：client 侧直接打开对应会话（sessions.open，apply 注入），
+    // 与侧边栏点击同一入口；之前只调 /dingo.switch 返回数据、从不真正打开。
+    openTarget?.(item.sessionId)
     // 已处理：顺带关闭卡片，避免残留提醒
     removeCard(item.id)
     void rpc.call('/dingo', 'feedback', { action: 'dismiss', id: item.id })

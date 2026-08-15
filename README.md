@@ -78,8 +78,8 @@ profile 的 `cordis.patch.yml` 或插件配置里可覆盖：
 - **client 半**（`src/client/FeedbackCard.tsx` + `tones.ts`）：
   - 轮询 `/dingo.feedback` 快照 → 当前对话项播 soft 档提示音（叮/叮叮）、其他对话项播 crisp 档 + 渲染卡片；
   - 内置两套提示音（soft/crisp，data URL WAV），不依赖任何外部音频文件；
-  - 点击卡片 → `/dingo.switch` 解析会话所属工作区 → 直达对应对话。
-- **RPC**（`/dingo` 通道）：`feedback` / `set-current-session` / `switch`。
+  - 点击卡片 → client 侧 `sessions.open` 直达对应对话（与侧边栏点击同一入口）。
+- **RPC**（`/dingo` 通道）：`feedback` / `set-current-session`。
 
 无 ASR、无 TTS、无 sidecar、无本地模型——提醒插件不需要"听懂"或"说出"任何内容。
 

@@ -34,13 +34,25 @@ export const LOCALE_NS = 'dingo'
 export function apply(ctx: ClientContext): void {
   const connection = ctx.get('connection') as unknown as ConnectionHandle
   const rpc = connection.rpc
+  // 会话跳转服务：卡片点击 → 直接打开对应对话（与侧边栏点击同一入口）。
+  // 注意：open 要求会话在列表内；未知/已删除会话会抛错，这里静默忽略。
+  const sessions = ctx.get('sessions') as { open(id: string): void } | undefined
 
   ctx.effect(() => {
     return ctx.slots.inject('shell.overlay', () => ctx.slots.register({
       name: 'shell.overlay',
       id: 'dsh-dingo-feedback',
       order: 50,
-      inject: () => ({ rpc }),
+      inject: () => ({
+        rpc,
+        openSession: (sessionId: string) => {
+          try {
+            sessions?.open(sessionId)
+          } catch {
+            // 会话已不在列表（删除/归档）→ 静默；卡片照常关闭
+          }
+        },
+      }),
     }, FeedbackCard as unknown as (props: FeedbackCardProps) => JSX.Element))
   }, 'dsh-dingo: feedback card slot')
 }
