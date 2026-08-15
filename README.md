@@ -43,10 +43,12 @@
 
 ```bash
 # 本地源码安装（开发）
-dsh plugin --profile <profile> add /path/to/dsh-dingo
+dsh plugin --profile web add /path/to/dsh-dingo
 
 # 或 npm 安装（发布后）
-dsh plugin --profile <profile> add dsh-dingo
+dsh plugin --profile web add dsh-dingo
+
+# <profile> 换成你要安装的目标 profile 名（本机常用 web）
 ```
 
 profile 的 `cordis.patch.yml` 或插件配置里可覆盖：

@@ -42,4 +42,4 @@ npm view dsh-dingo version   # 应显示新版本（刚发布有短暂传播延�
 - GitHub：https://github.com/february2015/dsh-dingo
 - 打包内容（`files` 字段）：`lib/`（构建产物 + 类型）、`cordis.patch.yml`、
   `README.md`、`LICENSE`；`prepack` 自动跑 `build` 重建 `lib/`。
-- 安装：`dsh plugin --profile <profile> add dsh-dingo`
+- 安装：`dsh plugin --profile web add dsh-dingo`（`web` 为本机 profile 名）
