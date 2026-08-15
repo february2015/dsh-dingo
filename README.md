@@ -61,6 +61,15 @@ dsh plugin --profile web add dsh-dingo
 # Replace "web" with your target profile name if different
 ```
 
+### System-notification prerequisites (optional feature)
+
+The optional system notifications (macOS Notification Center / Windows toast) need:
+
+- **macOS**: install once — `brew install terminal-notifier`. Without it, system notifications are skipped silently and only the in-browser cards/tone work.
+- **Windows**: nothing to install — uses built-in PowerShell (`scripts/notify.ps1` + `scripts/toast-activate.ps1`).
+
+Disable anytime with `systemNotify: false` (see config below).
+
 Overridable in the profile's `cordis.patch.yml` or plugin config:
 
 ```yaml

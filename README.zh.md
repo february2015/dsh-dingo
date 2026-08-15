@@ -61,6 +61,15 @@ dsh plugin --profile web add dsh-dingo
 # <profile> 换成你要安装的目标 profile 名（本机常用 web）
 ```
 
+### 系统通知前置要求（可选功能）
+
+系统级通知（macOS 通知中心 / Windows toast）需要：
+
+- **macOS**：一次性安装 `brew install terminal-notifier`。未安装时系统通知静默跳过，仅保留浏览器内卡片/提示音。
+- **Windows**：无需安装，用系统自带 PowerShell（`scripts/notify.ps1` + `scripts/toast-activate.ps1`）。
+
+随时可用 `systemNotify: false` 关闭（见下方配置）。
+
 profile 的 `cordis.patch.yml` 或插件配置里可覆盖：
 
 ```yaml
