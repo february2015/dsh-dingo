@@ -54,6 +54,23 @@ describe('isQuestionText', () => {
     expect(isQuestionText('部署已完成')).toBe(false)
   })
 
+  it('英文真问句 → 需回答', () => {
+    expect(isQuestionText('Can we deploy to production?')).toBe(true)
+    expect(isQuestionText('What do you think about this plan?')).toBe(true)
+    expect(isQuestionText('Is the build green now?')).toBe(true)
+    expect(isQuestionText('Why did the test fail?')).toBe(true)
+    expect(isQuestionText('Please confirm the version number.')).toBe(true) // 请求短语，无需问号
+    expect(isQuestionText('The build passed?')).toBe(true) // 短句确认
+  })
+
+  it('英文反问/自问自答/修辞 → 有回复', () => {
+    expect(isQuestionText("Isn't this obvious?")).toBe(false)
+    expect(isQuestionText('Why not just deploy it directly?')).toBe(false)
+    expect(isQuestionText('Should we roll back? No, because tests passed.')).toBe(false)
+    expect(isQuestionText('Is this the right approach? Actually there is a simpler way.')).toBe(false)
+    expect(isQuestionText('The build passed, didn\'t it?')).toBe(false) // 反意疑问
+  })
+
   it('空文本 → 有回复（不判定）', () => {
     expect(isQuestionText('')).toBe(false)
     expect(isQuestionText('   ')).toBe(false)

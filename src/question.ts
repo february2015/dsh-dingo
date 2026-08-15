@@ -1,58 +1,79 @@
 /**
  * 回复文本 → 是否需要用户回答（dsh-dingo 判定"有回复" vs "需回答"）。
  *
- * 判定策略（2026-08-15 收紧版）：
+ * 判定策略（2026-08-15 收紧版，中英文通用）：
  * - 真正的"需回答"优先来自结构化信号（ask_user 工具调用 / approval 请求 /
  *   questions 域提问），它们在 feedback.ts 中独立成事件源；
  *   本模块只兜底纯文本对话：AI 回复是否把球**明确踢回给用户**。
- * - 三层判定：
+ * - 三层判定（中文与英文同一套规则）：
  *   1. 明确请求动作/决策/确认的短语（无需问号）→ 需回答；
  *   2. 含问号 → 先排除反问句 / 自问自答 / 列举延续，再带疑问语气 → 需回答；
  *   3. 其余（疑问词只出现在陈述句里、无问号等）→ 有回复。
  *
  * 收紧动机：AI 思考/推理时也会产出疑问句（"是否需要回滚？不需要，因为…"、
- * "难道这不明显吗？"、"还要考虑性能如何？"），这些不是"等用户回答"，
- * 光靠关键词一票通过会把它们误判成"需回答"（叮叮 2 声）打扰用户。
+ * "难道这不明显吗？"、"还要考虑性能如何？"、"Should we roll back? No, because…"、
+ * "Isn't this obvious?"），这些不是"等用户回答"，光靠关键词一票通过
+ * 会把它们误判成"需回答"（叮叮 2 声）打扰用户。
  */
 
-/** 明确向用户请求动作/决策/确认的短语（无需问号，命中即需回答）。 */
+/** 中文：明确向用户请求动作/决策/确认的短语（无需问号，命中即需回答）。 */
 const REQUEST =
   /(请确认|请选择|请回答|请给个建议|请告诉我|需要你确认|需要你回答|需要你决定|需要你拍板|等你确认|等你回复|等你决定|等你消息|你决定|你来定|你拿主意|听你的|你怎么看|你觉得呢|你认为呢|你觉得怎么样|你认为怎么样|你觉得如何|你认为如何|给个建议|说一下你的想法|发表一下你的看法|你来说说|你来回答|你来选)/;
 
-/** 反问/修辞句特征（AI 自问自答或强调语气，不需要用户回答）。 */
+/** 英文：明确请求动作/决策/确认（无需问号）。 */
+const REQUEST_EN =
+  /\b(please confirm|please choose|please select|please let me know|let me know|your call|your decision|your thoughts|what do you think|do you agree|do you want|do you think|need your confirmation|need your decision|need your input|need your approval|please advise|waiting for your|tell me what you think|give me your opinion)\b/i;
+
+/** 中文：反问/修辞句特征（AI 自问自答或强调语气，不需要用户回答）。 */
 const RHETORICAL =
   /(难道|岂不|岂非|岂能|莫非|何尝|何必|何不|何须|何曾|哪能|哪会|怎么会|怎么能|怎么不|怎么没|不是.*吗|不就是.*吗|不都.*吗|有什么.*呢|有什么.*吗|谁说的|谁信|哪有|何苦|何必呢)/;
 
-/** 自问自答：问号后紧跟答案衔接词（"……吗？因为/是的/其实/所以……"）。 */
+/** 英文：反问/修辞特征（含反意疑问 tag question）。 */
+const RHETORICAL_EN =
+  /\b(isn'?t|aren'?t|wasn'?t|weren'?t|doesn'?t|don'?t|didn'?t|can'?t|cannot|wouldn'?t|shouldn'?t|won'?t|couldn'?t|mustn'?t|how could|why would|why not|who cares|so what)\b/i;
+
+/** 中文：自问自答：问号后紧跟答案衔接词（"……吗？因为/是的/其实/所以……"）。 */
 const SELF_ANSWER =
   /[？?]\s*(因为|由于|是的|对的|不[，,]|不需要|不用|不是的|不对|其实|总之|所以|因此|答案是|答案就是|也就是说|具体来说|说白了|关键在于|原因是|这取决于|简单说|一句话|归根结底)/;
 
-/** 列举延续：问号后紧跟列举/递进词（"？1. "、"？其次"……）→ AI 在列问题清单，非请求回答。 */
+/** 英文：自问自答：问号后紧跟答案衔接词（"…? Because/Yes/Actually…"）。 */
+const SELF_ANSWER_EN =
+  /[？?]\s*(because|since|yes|no|actually|in short|in other words|basically|the answer is|that'?s why|which means|meaning|so|therefore|i think|i believe|we can|we should|simply put|to be specific)\b/i;
+
+/** 中文：列举延续：问号后紧跟列举/递进词（"？1. "、"？其次"……）→ AI 在列问题清单。 */
 const LIST_CONTINUE = /[？?]\s*(\d+[.、)）]|[；;]|、|或者|另外|其次|还有|再者|以及|另外一个|最后一点)/;
 
-/** 问句中的疑问语气（在排除反问/自答/列举后才生效）。 */
+/** 英文：列举延续（问号后紧跟编号/递进词）。 */
+const LIST_CONTINUE_EN =
+  /[？?]\s*(\d+[.)]|next |second |third |another |also |in addition|moreover)/i;
+
+/** 中文：问句中的疑问语气（在排除反问/自答/列举后才生效）。 */
 const QUESTION_TONE = /(吗|呢|怎么|怎样|如何|什么|哪|是否|能不能|可不可以|可以吗|行不行|好不好|要不要|可好|可否|几|多少|谁|为什么|为何|干嘛|凭啥)/;
 
-/** 回复文本是否"需回答"（含疑问/请求确认特征）。 */
+/** 英文：问句中的疑问语气（wh- 疑问词，或助动词开头的疑问句）。 */
+const QUESTION_TONE_EN =
+  /\b(what|which|who|whom|whose|where|when|why|how)\b|^\s*(are|is|am|do|does|did|can|could|will|would|should|shall|may|might|must|have|has|had|was|were)\b/i;
+
+/** 回复文本是否"需回答"（含疑问/请求确认特征；中英文）。 */
 export function isQuestionText(text: string): boolean {
   const t = text.trim();
   if (t === '') return false;
 
   // 1) 明确请求动作/决策/确认 → 需回答（不依赖问号）
-  if (REQUEST.test(t)) return true;
+  if (REQUEST.test(t) || REQUEST_EN.test(t)) return true;
 
   // 2) 无问号 → 不算。疑问词出现在陈述句里是 AI 叙述（"我在想是否需要优化…"），不打扰。
   if (!/[？?]/.test(t)) return false;
 
-  // 3) 排除 AI 自问自答的三种形态
-  if (RHETORICAL.test(t)) return false; // 反问/修辞
-  if (SELF_ANSWER.test(t)) return false; // 问号后紧跟答案
-  if (LIST_CONTINUE.test(t)) return false; // 列举问题清单
+  // 3) 排除 AI 自问自答的三种形态（中英文）
+  if (RHETORICAL.test(t) || RHETORICAL_EN.test(t)) return false; // 反问/修辞
+  if (SELF_ANSWER.test(t) || SELF_ANSWER_EN.test(t)) return false; // 问号后紧跟答案
+  if (LIST_CONTINUE.test(t) || LIST_CONTINUE_EN.test(t)) return false; // 列举问题清单
 
   // 4) 带疑问语气（问号 + 疑问词）→ 需回答
-  if (QUESTION_TONE.test(t)) return true;
+  if (QUESTION_TONE.test(t) || QUESTION_TONE_EN.test(t)) return true;
 
-  // 5) 短句 + 问号（确认语气："构建通过了？"）→ 需回答
+  // 5) 短句 + 问号（确认语气："构建通过了？" / "The build passed?"）→ 需回答
   if (t.length <= 24) return true;
 
   return false;

@@ -22,9 +22,9 @@ Current conversation replies → **dang / dang-dang** (crisp tone set); other co
 | **Another conversation** needs your answer | ding-ding (soft) 2 beeps | ✅ top-right card |
 | Task failed | dong (low tone) | ✅ card |
 
-**When does a reply "need your answer"?** Structured signals first — `ask_user` tool calls, approval requests (`approval/asked`), and questions-domain prompts always count as "needs answer". For plain text, the heuristic is deliberately strict to avoid mistaking the model's self-talk for a question to you:
-- Explicit request for action / decision / confirmation ("please confirm", "please choose", "your call", "what do you think"…) → needs answer;
-- Question mark + question tone → needs answer, but **excludes** rhetorical questions (难道…吗？), self-answered Q&A (…吗？因为/其实…), and question-list enumerations (…？其次…);
+**When does a reply "need your answer"?** Works for both **English and Chinese**. Structured signals first — `ask_user` tool calls, approval requests (`approval/asked`), and questions-domain prompts always count as "needs answer". For plain text, the heuristic is deliberately strict to avoid mistaking the model's self-talk for a question to you:
+- Explicit request for action / decision / confirmation ("please confirm", "please choose", "your call", "what do you think"… / 请确认、需要你拍板、你怎么看…) → needs answer;
+- Question mark + question tone (wh-words, auxiliary-verb questions… / 吗/呢/怎么/是否…) → needs answer, but **excludes** rhetorical questions ("Isn't this obvious?" / 难道…吗？), self-answered Q&A ("Should we roll back? No, because…" / …吗？因为/其实…), and question-list enumerations (…? Next… / …？其次…);
 - Question words in a plain statement without a question mark → just a reply.
 
 **The card** (other conversations only):
