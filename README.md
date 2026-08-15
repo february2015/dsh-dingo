@@ -108,3 +108,5 @@ npm run verify      # typecheck + test + build
 ## License
 
 MIT
+
+Windows system-notification scripts adapted from [CAOGGL/dsh-ding](https://github.com/CAOGGL/dsh-ding) (MIT) — see [LICENSE](LICENSE) third-party notices.

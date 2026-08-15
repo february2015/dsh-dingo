@@ -108,3 +108,5 @@ npm run verify      # typecheck + test + build
 ## License
 
 MIT
+
+Windows 系统通知脚本参考自 [CAOGGL/dsh-ding](https://github.com/CAOGGL/dsh-ding)（MIT）——详见 [LICENSE](LICENSE) 的第三方声明。
