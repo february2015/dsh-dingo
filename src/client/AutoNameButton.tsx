@@ -49,7 +49,7 @@ export function AutoNameButton({ rpc, sessionId }: AutoNameButtonProps): JSX.Ele
       disabled={busy}
       onClick={() => void handleClick()}
     >
-      {busy ? '…' : '名'}
+      {busy ? '…' : '自动命名'}
     </button>
   )
 }
@@ -59,7 +59,7 @@ const styles: Record<string, React.CSSProperties> = {
     flex: 'none',
     height: 28,
     minWidth: 28,
-    padding: '0 8px',
+    padding: '0 10px',
     borderRadius: 999,
     border: '1px solid rgba(120,140,180,0.35)',
     background: 'rgba(24, 26, 32, 0.7)',
@@ -68,6 +68,7 @@ const styles: Record<string, React.CSSProperties> = {
     fontWeight: 500,
     lineHeight: 1,
     letterSpacing: 0.5,
+    whiteSpace: 'nowrap',
     cursor: 'pointer',
   },
 }
