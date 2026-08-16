@@ -201,6 +201,13 @@ export function SessionCardRailCompact({ rpc, openSession: openTarget, useSessio
   const draftOf = (sessionId: string): string => drafts[sessionId] ?? (sessionId === currentSessionId ? draft : '')
   const hasDraftFor = (sessionId: string): boolean => draftOf(sessionId).trim().length > 0
 
+  /** 判断是否内部会话（TaskSwarm Worker / 子代理），不参与用户卡片/统计。 */
+  const isInternalSession = (sessionId: string): boolean => {
+    const info = ((sessionTitles ?? {}) as Record<string, { origin?: string; cwd?: string }>)[sessionId]
+    return info?.origin === 'subagent'
+      || (typeof info?.cwd === 'string' && /[\\/]\.taskswarm[\\/]worktrees[\\/]/.test(info.cwd))
+  }
+
   // 已播放过提示音的 speaking 项（每 id 一次）
   const tonePlayed = useRef(new Set<string>())
   // 见过 speaking 的项（speaking → 消失 的过渡只报一次 spoken）
@@ -352,8 +359,7 @@ export function SessionCardRailCompact({ rpc, openSession: openTarget, useSessio
     const sid = String(id)
     const info = summaries[sid]
     // 子代理/Worker 会话不进入卡片清单。
-    if (info?.origin === 'subagent') continue
-    if (info?.cwd && /[\\/]\.taskswarm[\\/]worktrees[\\/]/.test(info.cwd)) continue
+    if (isInternalSession(sid)) continue
     if (items.some((card) => card.sessionId === sid)) continue
     if (!hasDraftFor(sid) && !hasBackgroundWork(sid)) continue
     syntheticCards.push({
@@ -385,7 +391,7 @@ export function SessionCardRailCompact({ rpc, openSession: openTarget, useSessio
   const intermediate = panelItems.filter((card) => card.status === 'running' && card.hasIntermediate && card.sessionId !== currentSessionId)
   const needsTotal = errors.length + questions.length + answers.length
   // 仅“非当前对话”的草稿才参与顶部提醒；当前对话正在输入是正常状态。
-  const otherDraftCount = allSessionIds.filter((id) => String(id) !== currentSessionId && hasDraftFor(String(id))).length
+  const otherDraftCount = allSessionIds.filter((id) => String(id) !== currentSessionId && !isInternalSession(String(id)) && hasDraftFor(String(id))).length
   const priority = errors.length > 0 ? 'error' : questions.length > 0 ? 'question' : otherDraftCount > 0 ? 'draft' : answers.length > 0 ? 'answered' : undefined
   const priorityCount = priority === 'draft' ? otherDraftCount : needsTotal
 

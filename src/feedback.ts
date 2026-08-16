@@ -1156,12 +1156,13 @@ export function installFeedback(
 export interface SessionLike {
   readonly id: string
   readonly header?: { readonly cwd?: string }
-  readonly meta?: { readonly origin?: string; readonly cwd?: string }
+  readonly meta?: { readonly origin?: string; readonly cwd?: string; readonly taskswarmWorker?: boolean }
 }
 
 /** 判断是否 TaskSwarm 子 Worker / 子代理会话（不应出现在用户卡片清单）。 */
-function isTaskSwarmWorkerSession(session: { header?: { cwd?: string }; meta?: { origin?: string; cwd?: string } }): boolean {
+function isTaskSwarmWorkerSession(session: { header?: { cwd?: string }; meta?: { origin?: string; cwd?: string; taskswarmWorker?: boolean } }): boolean {
   if (session.meta?.origin === 'subagent') return true
+  if (session.meta?.taskswarmWorker === true) return true
   const cwd = session.meta?.cwd ?? session.header?.cwd
   return typeof cwd === 'string' && /[\\/]\.taskswarm[\\/]worktrees[\\/]/.test(cwd)
 }
