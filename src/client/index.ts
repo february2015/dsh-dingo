@@ -16,6 +16,7 @@ import type {} from '@deepseek-ai/dsh-client-ui-slots'
 import type {} from '@deepseek-ai/dsh-client-ui-layout/client'
 import { SessionCardRailCompact, type SessionCardRailCompactProps } from './SessionCardRailCompact.tsx'
 import { AutoNameButton, type AutoNameButtonProps } from './AutoNameButton.tsx'
+import { WorkspaceLabel, type WorkspaceLabelProps } from './WorkspaceLabel.tsx'
 import { installDeepLink } from './deep-link.ts'
 
 /** 客户端插件名（web server 按此 id 注册/卸载）。 */
@@ -118,7 +119,16 @@ export function apply(ctx: ClientContext): void {
     }, SessionCardRailCompact as unknown as (props: SessionCardRailCompactProps) => JSX.Element))
   }, 'dsh-dingo: session card rail slot')
 
-  // 2.0 自动命名按钮：放在标准操作之后、卡片 Rail 左侧。
+  // 2.0 当前工作区标签：放在标准操作之后、Rename 之前。
+  ctx.effect(() => {
+    return ctx.slots.inject('conversation.session.header.actions', () => ctx.slots.register({
+      name: 'conversation.session.header.actions',
+      id: 'dsh-dingo-workspace-label',
+      order: 40,
+    }, WorkspaceLabel as unknown as (props: WorkspaceLabelProps) => JSX.Element))
+  }, 'dsh-dingo: workspace label slot')
+
+  // 2.0 自动命名按钮：放在工作区标签之后、卡片 Rail 左侧。
   ctx.effect(() => {
     return ctx.slots.inject('conversation.session.header.actions', () => ctx.slots.register({
       name: 'conversation.session.header.actions',
