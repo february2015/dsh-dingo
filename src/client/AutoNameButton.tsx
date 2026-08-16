@@ -49,7 +49,7 @@ export function AutoNameButton({ rpc, sessionId }: AutoNameButtonProps): JSX.Ele
       disabled={busy}
       onClick={() => void handleClick()}
     >
-      {busy ? '…' : '自动命名'}
+      {busy ? '…' : 'Rename'}
     </button>
   )
 }
