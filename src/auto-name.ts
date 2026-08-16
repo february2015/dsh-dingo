@@ -109,13 +109,13 @@ async function generateTitleWithLlm(ctx: Context, texts: string[]): Promise<stri
   if (!llm?.stream || texts.length === 0) return undefined
 
   const prompt = [
-    '请根据以下用户消息，生成一个简洁、准确且有区分度的会话标题。',
+    '请根据以下最近 5 条用户消息，生成一个简洁、准确且有区分度的会话标题。',
     '要求：',
     '- 中文 6~20 字，或英文 3~12 词；',
-    '- 尽量包含具体任务/主题关键词，避免与其他会话标题前几个字雷同；',
-    '- 只输出标题本身，不要解释、不要引号。',
+    '- 标题要具体，尤其开头几个字要能和其他会话明显区分，避免都是“帮我/优化/请问”这类雷同前缀；',
+    '- 只输出标题本身，不要解释、不要思考过程、不要引号。',
     '',
-    '用户消息：',
+    '最近用户消息：',
     ...texts.slice(-5).map((text, index) => `${index + 1}. ${text}`),
   ].join('\n')
 
