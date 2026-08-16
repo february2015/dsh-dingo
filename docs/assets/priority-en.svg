@@ -1,0 +1,14 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="420" height="340" viewBox="0 0 420 340">
+  <rect x="1" y="1" width="418" height="338" rx="12" fill="#14161c" stroke="#2d3340"/>
+  <text x="24" y="36" font-family="sans-serif" font-size="16" fill="#e8e8e8">Status Priority</text>
+
+  <circle cx="44" cy="70" r="8" fill="#ef4444"/><text x="62" y="75" font-family="sans-serif" font-size="14" fill="#fff">1 Error</text>
+  <circle cx="44" cy="105" r="8" fill="#f59e0b"/><text x="62" y="110" font-family="sans-serif" font-size="14" fill="#fff">2 Question</text>
+  <circle cx="44" cy="140" r="8" fill="#a855f7"/><text x="62" y="145" font-family="sans-serif" font-size="14" fill="#fff">3 Draft</text>
+  <circle cx="44" cy="175" r="8" fill="#22c55e"/><text x="62" y="180" font-family="sans-serif" font-size="14" fill="#fff">4 To Read</text>
+  <circle cx="44" cy="210" r="8" fill="#14b8a6"/><text x="62" y="215" font-family="sans-serif" font-size="14" fill="#fff">5 Waiting (background/subtasks/swarm)</text>
+  <circle cx="44" cy="245" r="8" fill="#22d3ee"/><text x="62" y="250" font-family="sans-serif" font-size="14" fill="#fff">6 Intermediate</text>
+  <path d="M36 272 A8 8 0 1 1 35.9 288" fill="none" stroke="#60a5fa" stroke-width="4" stroke-linecap="round"/>
+  <text x="62" y="280" font-family="sans-serif" font-size="14" fill="#fff">7 Running</text>
+  <circle cx="44" cy="310" r="8" fill="#9ca3af"/><text x="62" y="315" font-family="sans-serif" font-size="14" fill="#fff">8 Normal</text>
+</svg>

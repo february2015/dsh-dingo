@@ -18,7 +18,7 @@
 
 ## Status Priority
 
-![Status Priority](docs/assets/priority.svg)
+![Status Priority](docs/assets/priority-en.svg)
 
 | Priority | Status | Meaning | Color |
 |---|---|---|---|
@@ -50,7 +50,7 @@
 
 ![Stats Pill](docs/assets/stats-pill.svg)
 
-![Card Panel](docs/assets/card-panel.svg)
+![Card Panel](docs/assets/card-panel-en.svg)
 
 ## Auto Naming
 
