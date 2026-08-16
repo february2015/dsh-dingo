@@ -10,7 +10,9 @@
 - Multiple statuses with colors and priority ordering
 - Compact summary pill + hover detail panel
 - Cross-session draft detection
-- Background job / subagent waiting state
+- Background job / subagent / swarm waiting state
+- Current workspace label
+- Background task count display
 - Auto-naming (button / natural language / command)
 - Sounds + system notifications + deep-link (kept from 1.x)
 
@@ -32,15 +34,17 @@
 ## Usage
 
 - The session header shows:
+  - Workspace label: the current session's workspace.
   - `Rename` button: auto-name the current session.
   - Summary pill: status counts for all active sessions.
 - Hover or click the summary pill to open the detailed panel:
-  - First line: workspace name.
+  - First line: workspace name (with a small spinner + unfinished background task count if any).
   - Second line: session name.
   - Different colors per status.
   - Click a card to open that session.
   - `×` removes the card for this round.
 - The panel auto-closes after 5 seconds, or you can click the pill to toggle it.
+- Subagent / Worker sessions do not appear in the card list.
 
 ## Auto Naming
 
