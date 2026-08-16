@@ -367,7 +367,7 @@ function DetailedCard({
     >
       <SessionStatusIcon status={card.status} />
       <span style={styles.body}>
-        <span style={styles.workspace}>{truncate(card.workspaceTitle ?? '', 16) || '对话'}</span>
+        <span style={styles.workspace}>{truncate(card.workspaceTitle ?? '', 16) || '（无工作区）'}</span>
         <span style={styles.session}>
           {truncate(title, 20) || '（未命名对话）'}
           {isDraft ? ' ✎' : ''}
