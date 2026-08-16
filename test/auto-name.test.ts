@@ -15,7 +15,7 @@ function fakeCtx(overrides: {
             ok: true,
             value: {
               events: [
-                { event: { type: 'user/message', data: { message: { content: '帮我优化一下这个项目的构建流程' } } } },
+                { event: { type: 'user/message', data: { content: '帮我优化一下这个项目的构建流程' } } },
                 { event: { type: 'assistant/message', data: { message: { content: '好的，我来分析构建脚本。' } } } },
               ],
             },

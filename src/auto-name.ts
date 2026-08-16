@@ -75,9 +75,11 @@ function extractRecentUserTexts(events: readonly HistoryEntryLike[]): string[] {
     const event = entry.event
     if (!event) continue
     if (event.type !== 'user/message') continue
-    const data = event.data as { message?: { content?: unknown } } | undefined
-    const message = data?.message ?? (event.message as { content?: unknown } | undefined)
-    const text = extractText(message?.content)
+    const data = event.data as { content?: unknown; message?: { content?: unknown } } | undefined
+    // dsh-session 的 user/message 事件 data 就是 UserMessage 本身（content 在 data.content），
+    // 兼容旧形状 data.message.content。
+    const content = data && 'content' in data ? data.content : data?.message?.content
+    const text = extractText(content)
     if (text) texts.push(text)
   }
   // 最近消息在尾部；只取最近 5 条用户消息，控制 token 成本。
