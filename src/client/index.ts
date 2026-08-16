@@ -101,10 +101,10 @@ export function apply(ctx: ClientContext): void {
 
   // 2.0 卡片 Rail：放在自动命名按钮右侧。
   ctx.effect(() => {
-    return ctx.slots.inject('conversation.session.header.actions', () => ctx.slots.register({
-      name: 'conversation.session.header.actions',
+    return ctx.slots.inject('conversation.session.header.utilities', () => ctx.slots.register({
+      name: 'conversation.session.header.utilities',
       id: 'dsh-dingo-card-rail',
-      order: 100,
+      order: 0,
       inject: () => ({
         rpc,
         getDraftBySession,
