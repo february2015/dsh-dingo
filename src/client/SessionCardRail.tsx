@@ -138,8 +138,7 @@ export function SessionCardRail({ rpc, openSession: openTarget, useSessions }: S
   // Rail 容器与折叠状态
   const railRef = useRef<HTMLDivElement | null>(null)
   const innerRef = useRef<HTMLDivElement | null>(null)
-  const measureRef = useRef<HTMLDivElement | null>(null)
-  const [visibleCount, setVisibleCount] = useState<number | undefined>(undefined)
+  const [hiddenCount, setHiddenCount] = useState(0)
   const [panelOpen, setPanelOpen] = useState(false)
 
   /** 点击卡片：执行中只跳转；结论态跳转并标记「正常」（已看过）。 */
@@ -214,11 +213,10 @@ export function SessionCardRail({ rpc, openSession: openTarget, useSessions }: S
     void rpc.call('/dingo', 'set-current-session', { sessionId: currentSessionId }).catch(() => {})
   }, [currentSessionId, rpc])
 
-  // 溢出检测：用隐藏的全量测量容器计算能放下几张，再折叠为 +N。
+  // 溢出检测：始终渲染全部卡片，只有空间不足时才把后面的折叠为 +N。
   useEffect(() => {
     const el = innerRef.current
-    const measureEl = measureRef.current
-    if (!el || !measureEl) return
+    if (!el) return
 
     const countFit = (children: HTMLElement[], width: number): number => {
       let count = 0
@@ -232,14 +230,14 @@ export function SessionCardRail({ rpc, openSession: openTarget, useSessions }: S
     const measure = (): void => {
       const total = snapshot?.cards.length ?? 0
       if (total === 0) {
-        setVisibleCount(undefined)
+        setHiddenCount(0)
         return
       }
-      const children = Array.from(measureEl.querySelectorAll<HTMLElement>('[data-card-index]'))
+      const children = Array.from(el.querySelectorAll<HTMLElement>('[data-card-index]'))
       const rawFit = countFit(children, el.clientWidth)
-      // 若确实有折叠，箭头按钮还要占约 36px，重算一次。
+      // 只有确实放不下时才预留箭头按钮空间，并且只折叠后面的卡片。
       const fit = rawFit < total ? countFit(children, Math.max(0, el.clientWidth - 36)) : rawFit
-      setVisibleCount(Math.max(0, Math.min(fit, total)))
+      setHiddenCount(Math.max(0, total - fit))
     }
 
     measure()
@@ -266,33 +264,10 @@ export function SessionCardRail({ rpc, openSession: openTarget, useSessions }: S
   const items = snapshot.cards
   if (items.length === 0) return null
 
-  const shownCount = visibleCount === undefined ? items.length : Math.min(visibleCount, items.length)
-  const shown = items.slice(0, shownCount)
-  const hiddenCount = items.length - shown.length
-
   return (
     <div ref={railRef} className="lv-fb-rail" style={styles.rail}>
       <div ref={innerRef} style={styles.railInner}>
-        {/* 隐藏的全量测量容器：始终包含所有卡片，用于 ResizeObserver 计算折叠数量 */}
-        <div ref={measureRef} aria-hidden style={styles.measure}>
-          {items.map((card, index) => (
-            <div key={card.sessionId} data-card-index={index} style={styles.compact}>
-              <SessionStatusIcon status={card.status} />
-              <span style={styles.compactText}>
-                {truncate(
-                  card.workspaceTitle
-                    ?? (sessionTitles as Record<string, { displayTitle?: string }> | undefined)?.[card.sessionId]?.displayTitle
-                    ?? '对话',
-                  6,
-                )}
-                {card.sessionTitle || (sessionTitles as Record<string, { displayTitle?: string }> | undefined)?.[card.sessionId]?.displayTitle
-                  ? `·${truncate(card.sessionTitle ?? (sessionTitles as Record<string, { displayTitle?: string }> | undefined)?.[card.sessionId]?.displayTitle ?? '', 8)}`
-                  : ''}
-              </span>
-            </div>
-          ))}
-        </div>
-        {shown.map((card, index) => (
+        {items.map((card, index) => (
           <div
             key={card.sessionId}
             data-card-index={index}
@@ -315,20 +290,20 @@ export function SessionCardRail({ rpc, openSession: openTarget, useSessions }: S
             </span>
           </div>
         ))}
-        {hiddenCount > 0 && (
-          <button
-            type="button"
-            style={styles.more}
-            aria-label={`展开全部卡片（+${hiddenCount}）`}
-            onClick={(event) => {
-              event.stopPropagation()
-              setPanelOpen((value) => !value)
-            }}
-          >
-            +{hiddenCount}
-          </button>
-        )}
       </div>
+      {hiddenCount > 0 && (
+        <button
+          type="button"
+          style={styles.more}
+          aria-label={`展开全部卡片（+${hiddenCount}）`}
+          onClick={(event) => {
+            event.stopPropagation()
+            setPanelOpen((value) => !value)
+          }}
+        >
+          +{hiddenCount}
+        </button>
+      )}
       {panelOpen && (
         <div style={styles.panel}>
           {items.map((card) => (
@@ -378,27 +353,19 @@ const styles: Record<string, React.CSSProperties> = {
     display: 'inline-flex',
     alignItems: 'center',
     flex: 'none',
+    maxWidth: '100%',
   },
   railInner: {
     display: 'inline-flex',
     alignItems: 'center',
     gap: 4,
     maxWidth: '100%',
+    minWidth: 0,
     overflow: 'hidden',
-    flex: 'none',
-  },
-  measure: {
-    position: 'absolute',
-    left: 0,
-    top: 0,
-    visibility: 'hidden',
-    pointerEvents: 'none',
-    display: 'flex',
-    alignItems: 'center',
-    gap: 4,
-    width: 'max-content',
+    flex: '0 1 auto',
   },
   compact: {
+    flex: '0 0 auto',
     display: 'inline-flex',
     alignItems: 'center',
     gap: 4,
@@ -424,7 +391,11 @@ const styles: Record<string, React.CSSProperties> = {
     whiteSpace: 'nowrap',
   },
   more: {
-    flex: 'none',
+    position: 'absolute',
+    right: 0,
+    top: '50%',
+    transform: 'translateY(-50%)',
+    zIndex: 1,
     height: 28,
     minWidth: 28,
     padding: '0 8px',
