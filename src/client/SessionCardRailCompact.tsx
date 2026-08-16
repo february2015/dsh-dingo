@@ -139,7 +139,7 @@ export interface SessionCardRailCompactProps {
   getDraftBySession?: (sessionId: string) => string
 }
 
-/** 排序：异常 > 疑问 > 草稿 > 等待后台/子任务 > 待阅读 > 中间输出 > 执行中 > 正常。 */
+/** 排序：异常 > 疑问 > 草稿 > 待阅读 > 等待后台/子任务 > 中间输出 > 执行中 > 正常。 */
 function cardRank(
   card: SessionCardView,
   isDraftFor?: (sessionId: string) => boolean,
@@ -153,11 +153,11 @@ function cardRank(
     case 'question':
       return 1
     case 'answered':
-      return isDraft ? 2 : waiting ? 3 : 4
+      return isDraft ? 2 : 3
     case 'running':
       return isDraft ? 2 : card.hasIntermediate ? 5 : 6
     case 'normal':
-      return isDraft ? 2 : waiting ? 3 : 7
+      return isDraft ? 2 : waiting ? 4 : 7
     default:
       return 8
   }
