@@ -48,8 +48,8 @@ export interface SessionCardView {
   hasIntermediate?: boolean
   /** 该会话是否有 TaskSwarm 蜂群批次仍在运行。 */
   hasSwarm?: boolean
-  /** 该会话 TaskSwarm 蜂群中未完成的 lane 数量。 */
-  swarmLaneCount?: number
+  /** 该会话 TaskSwarm 蜂群中各 Wave 未完成的 lane 数量（如 [3, 2]）。 */
+  swarmWaveCounts?: number[]
 }
 
 /** `/dingo.feedback {action:'announcements'}` 响应快照。 */
@@ -458,7 +458,8 @@ export function SessionCardRailCompact({ rpc, openSession: openTarget, useSessio
               sessionTitles={sessionTitles as Record<string, { displayTitle?: string }> | undefined}
               isDraft={hasDraftFor(card.sessionId)}
               isWaiting={isWaiting(card.sessionId)}
-              backgroundCount={backgroundJobCount(card.sessionId) + (card.swarmLaneCount ?? 0)}
+              dsJobsCount={backgroundJobCount(card.sessionId)}
+              swarmWaveCounts={card.swarmWaveCounts ?? []}
               onOpen={handleOpenSession}
               onDismiss={handleDismiss}
             />
@@ -475,7 +476,8 @@ function DetailedCard({
   sessionTitles,
   isDraft,
   isWaiting,
-  backgroundCount,
+  dsJobsCount,
+  swarmWaveCounts,
   onOpen,
   onDismiss,
 }: {
@@ -483,7 +485,8 @@ function DetailedCard({
   sessionTitles?: Record<string, { displayTitle?: string; cwd?: string }>
   isDraft?: boolean
   isWaiting?: boolean
-  backgroundCount?: number
+  dsJobsCount?: number
+  swarmWaveCounts?: number[]
   onOpen: (card: SessionCardView) => void
   onDismiss: (sessionId: string) => void
 }): JSX.Element {
@@ -508,12 +511,20 @@ function DetailedCard({
       <span style={styles.body}>
         <span style={styles.workspace}>
           {truncate(workspaceTitle ?? '', 16) || '（无工作区）'}
-          {backgroundCount ? (
+          {dsJobsCount ? (
             <>
               <span style={styles.miniSpinner} />
-              {backgroundCount}
+              {dsJobsCount}
             </>
           ) : null}
+          {dsJobsCount ? ' · ' : ''}
+          {(swarmWaveCounts ?? []).map((count, index) => (
+            <span key={index} style={styles.waveSeg}>
+              {index > 0 ? '· ' : ''}
+              {index === 0 && <span style={styles.miniSpinner} />}
+              {count}
+            </span>
+          ))}
         </span>
         <span style={styles.session}>
           {truncate(title, 20) || '（未命名对话）'}
@@ -722,6 +733,11 @@ const styles: Record<string, React.CSSProperties> = {
     animation: 'lv-fb-spin 0.8s linear infinite',
     boxSizing: 'border-box',
     flex: 'none',
+  },
+  waveSeg: {
+    display: 'inline-flex',
+    alignItems: 'center',
+    gap: 3,
   },
   session: {
     fontSize: 13,
