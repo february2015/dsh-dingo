@@ -44,13 +44,13 @@ export function apply(ctx: ClientContext): void {
   const conversation = ctx.get('conversation') as {
     input: {
       for(actx: unknown): { state: { getSnapshot(): { draft: string } } }
+      shell?(id: string): { state: { getSnapshot(): { draft: string } } }
     }
   } | undefined
   const getDraftBySession = (sessionId: string): string => {
     try {
-      const binding = sessions?.binding(sessionId)
-      if (!binding) return ''
-      return conversation?.input.for(binding.ctx).state.getSnapshot()?.draft ?? ''
+      const input = conversation?.input.shell?.(sessionId) ?? conversation?.input.for((sessions?.binding(sessionId) as { ctx: unknown } | undefined)?.ctx as never)
+      return input?.state.getSnapshot()?.draft ?? ''
     } catch {
       return ''
     }
