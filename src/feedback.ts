@@ -243,7 +243,7 @@ const MAX_REPLAY_COUNT = 2;
 /** 最近已播历史上限。 */
 const HISTORY_CAP = 8;
 /** 2.0：正常（已看过）卡片在完成超过该时长后自动隐藏。 */
-const CARD_HIDE_AFTER_SEEN_MS = 10 * 60 * 1000;
+const CARD_HIDE_AFTER_SEEN_MS = 60 * 60 * 1000;
 // ─────────────────────────── 播报模板 ───────────────────────────
 
 /**
@@ -376,7 +376,7 @@ export class FeedbackEngine {
 
   /**
    * 会话卡片快照：三组顺序——需关注（answered/question/error）→ 执行中（running）
-   * → 已看过（normal）。正常卡片若已完成超过 10 分钟则自动隐藏。
+   * → 已看过（normal）。正常卡片若已完成超过 1 小时则自动隐藏。
    */
   cardViews(): readonly SessionCardView[] {
     const now = this.now();

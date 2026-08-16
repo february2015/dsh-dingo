@@ -251,13 +251,13 @@ describe('2.0 会话卡片（五态 + 排序 + 隐藏）', () => {
     expect(statuses).toEqual(['answered', 'running', 'normal'])
   })
 
-  it('正常卡片完成超过 10 分钟后自动隐藏', () => {
+  it('正常卡片完成超过 1 小时后自动隐藏', () => {
     let now = 1000
     const { engine } = build({ now: () => now })
     engine.handleSessionEvent({ id: 'sess-a' }, sessionEvent('turn/end', { reason: { kind: 'completed' } }))
     engine.markSeen('sess-a')
     expect(engine.cardViews()).toHaveLength(1)
-    now += 10 * 60 * 1000 + 1
+    now += 60 * 60 * 1000 + 1
     expect(engine.cardViews()).toHaveLength(0)
   })
 
