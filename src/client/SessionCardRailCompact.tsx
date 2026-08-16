@@ -83,6 +83,9 @@ function basename(path?: string): string | undefined {
   return parts.length > 0 ? parts[parts.length - 1] : undefined
 }
 
+/** 跨会话草稿持久化（模块级，避免 header 随会话切换重挂载后丢失）。 */
+const persistedDrafts = new Map<string, string>()
+
 /** 2.0 状态图标：执行中=spinner；有答案=绿方块；有疑问=橙问号；有异常=红感叹号；正常=灰圆点。 */
 function SessionStatusIcon({ status }: { status: SessionCardStatus }): JSX.Element {
   switch (status) {
@@ -332,30 +335,13 @@ export function SessionCardRailCompact({ rpc, openSession: openTarget, useSessio
     }
   }, [rpc])
 
-  // 轮询所有会话的草稿状态（用于跨会话提醒）。
+  // 记录当前会话草稿到模块级 Map，切换会话后仍能识别“填了但没发送”的会话。
   useEffect(() => {
-    if (!getDraftBySession) return
-    let stopped = false
-    const sync = (): void => {
-      if (stopped) return
-      const next: Record<string, string> = {}
-      for (const id of allSessionIds) {
-        const value = getDraftBySession(String(id))
-        if (value.trim()) next[String(id)] = value
-      }
-      setDrafts((prev) => {
-        const changed = Object.keys(next).length !== Object.keys(prev).length
-          || Object.entries(next).some(([k, v]) => prev[k] !== v)
-        return changed ? next : prev
-      })
-    }
-    sync()
-    const timer = setInterval(sync, 1000)
-    return () => {
-      stopped = true
-      clearInterval(timer)
-    }
-  }, [getDraftBySession, allSessionIds])
+    if (!currentSessionId) return
+    if (draft.trim()) persistedDrafts.set(currentSessionId, draft)
+    else persistedDrafts.delete(currentSessionId)
+    setDrafts({ ...Object.fromEntries(persistedDrafts) })
+  }, [currentSessionId, draft])
 
 
   // 上报"当前查看的对话"：host 判定当前对话回复 → 当/当当（crisp 档），
