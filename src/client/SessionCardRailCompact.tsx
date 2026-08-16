@@ -278,6 +278,7 @@ export function SessionCardRailCompact({ rpc, openSession: openTarget, useSessio
           borderColor: priorityColor,
           boxShadow: `0 0 10px ${priorityColor}`,
           animation: 'lv-fb-border-pulse 1s ease-in-out infinite',
+          animationDelay: '-0.5s',
           ['--lv-fb-pulse-color' as string]: priorityColor,
         }
       : {}),
