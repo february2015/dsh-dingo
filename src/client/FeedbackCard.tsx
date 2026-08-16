@@ -182,15 +182,26 @@ export function FeedbackCard({ rpc, openSession: openTarget, useSessions }: Feed
   }
 
 
-  /** 点击卡片本体 → 跳到对应对话（无 sessionId 的卡片不可跳转）。 */
+  /** 点击卡片本体 → 跳到对应对话（无 sessionId 的卡片不可跳转）。
+   *  清除该对话的所有提醒卡片（同一会话的多张卡片一起消失），其他对话保留。 */
   const handleOpenSession = (item: AnnouncementView): void => {
     if (item.sessionId === undefined || item.sessionId === '') return
     // 跳转：client 侧直接打开对应会话（sessions.open，apply 注入），
-    // 与侧边栏点击同一入口；之前只调 /dingo.switch 返回数据、从不真正打开。
+    // 与侧边栏点击同一入口。
     openTarget?.(item.sessionId)
-    // 已处理：顺带关闭卡片，避免残留提醒
-    removeCard(item.id)
-    void rpc.call('/dingo', 'feedback', { action: 'dismiss', id: item.id })
+    // 清除该会话的所有提醒卡片（同对话多张卡片一起消失），
+    // 其他对话的卡片保留——跳过去后这个对话的提醒都不再需要。
+    const target = item.sessionId
+    setCards((prev) => {
+      const next = new Map(prev)
+      for (const [id, entry] of next) {
+        if (entry.item.sessionId === target) {
+          next.delete(id)
+          void rpc.call('/dingo', 'feedback', { action: 'dismiss', id })
+        }
+      }
+      return next
+    })
   }
 
   useEffect(() => {

@@ -32,7 +32,7 @@ Current conversation replies → **dang / dang-dang** (crisp tone set); other co
 - Shows: status icon + workspace name (≤12 chars) + conversation title (≤10 chars);
   - 🟩 green square = reply, 🟠 question mark = needs answer, 🔴 exclamation = failed;
 - **Click the card → jump to that conversation**; **×** in the corner closes it;
-- Cards stack from the top right (below the Session log button), 8px apart; after a jump, the remaining cards reflow up;
+- Cards stack from the top right (below the Session log button), 8px apart; clicking a card clears **all** cards of that conversation and the rest reflow up;
 - Cards stay for 30s after the alert so you can click/close them, then auto-dismiss.
 
 **Reminder discipline**:
