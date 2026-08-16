@@ -167,6 +167,28 @@ function cardRank(
   }
 }
 
+/** 统计互斥归桶：每个会话只进一个桶，按异常 > 疑问 > 草稿 > 待阅读 > 等待 > 中间 > 执行 > 正常。 */
+function summaryBucket(
+  card: SessionCardView,
+  currentSessionId?: string,
+  isDraftFor?: (sessionId: string) => boolean,
+  isWaiting?: (sessionId: string) => boolean,
+): 'error' | 'question' | 'draft' | 'answered' | 'waiting' | 'intermediate' | 'running' | 'normal' | undefined {
+  if (card.status === 'error') return 'error'
+  if (card.status === 'question') return 'question'
+  const isDraft = card.sessionId !== currentSessionId && (isDraftFor?.(card.sessionId) ?? false)
+  if (isDraft) return 'draft'
+  if (card.status === 'answered') return 'answered'
+  const waiting = card.sessionId !== currentSessionId && (isWaiting?.(card.sessionId) ?? false)
+  if (waiting && card.status === 'normal') return 'waiting'
+  if (card.status === 'running') {
+    if (card.sessionId === currentSessionId) return undefined
+    return card.hasIntermediate ? 'intermediate' : 'running'
+  }
+  if (card.status === 'normal') return 'normal'
+  return undefined
+}
+
 /**
  * 紧凑统计 Rail：内嵌只显示一个统计胶囊，悬停/点击弹出详细卡片面板。
  */
@@ -390,17 +412,22 @@ export function SessionCardRailCompact({ rpc, openSession: openTarget, useSessio
     (a, b) => cardRank(a, hasDraftFor, isWaiting) - cardRank(b, hasDraftFor, isWaiting),
   )
 
-  const errors = items.filter((card) => card.status === 'error')
-  const questions = items.filter((card) => card.status === 'question')
-  const answers = items.filter((card) => card.status === 'answered')
-  const running = panelItems.filter((card) => card.status === 'running' && card.sessionId !== currentSessionId)
-  const normal = items.filter((card) => card.status === 'normal')
-  const waiting = panelItems.filter((card) => isWaiting(card.sessionId) && card.sessionId !== currentSessionId && (card.status === 'answered' || card.status === 'normal'))
-  const intermediate = panelItems.filter((card) => card.status === 'running' && card.hasIntermediate && card.sessionId !== currentSessionId)
-  const needsTotal = errors.length + questions.length + answers.length
-  // 仅“非当前对话”的草稿才参与顶部提醒；当前对话正在输入是正常状态。
-  const otherDraftCount = allSessionIds.filter((id) => String(id) !== currentSessionId && !isInternalSession(String(id)) && hasDraftFor(String(id))).length
-  const priority = errors.length > 0 ? 'error' : questions.length > 0 ? 'question' : otherDraftCount > 0 ? 'draft' : answers.length > 0 ? 'answered' : undefined
+  // 互斥统计：每个会话只归入一个最高优先级桶。
+  const counts = { error: 0, question: 0, draft: 0, answered: 0, waiting: 0, intermediate: 0, running: 0, normal: 0 }
+  for (const card of panelItems) {
+    const bucket = summaryBucket(card, currentSessionId, hasDraftFor, isWaiting)
+    if (bucket) counts[bucket]++
+  }
+  const errors = counts.error
+  const questions = counts.question
+  const answers = counts.answered
+  const running = counts.running
+  const normal = counts.normal
+  const waiting = counts.waiting
+  const intermediate = counts.intermediate
+  const otherDraftCount = counts.draft
+  const needsTotal = errors + questions + answers
+  const priority = errors > 0 ? 'error' : questions > 0 ? 'question' : otherDraftCount > 0 ? 'draft' : answers > 0 ? 'answered' : undefined
   const priorityCount = priority === 'draft' ? otherDraftCount : needsTotal
 
   const priorityColor = priority === 'error' ? '#ef4444' : priority === 'question' ? '#f59e0b' : priority === 'draft' ? '#a855f7' : priority === 'answered' ? '#22c55e' : undefined
@@ -440,14 +467,14 @@ export function SessionCardRailCompact({ rpc, openSession: openTarget, useSessio
           <span style={{ ...styles.dot, background: priorityColor, animation: pulse }} />
         )}
         {priorityCount > 0 && <span style={styles.count}>{priorityCount}</span>}
-        {running.length > 0 && <span style={styles.spinner} />}
-        {running.length > 0 && <span style={styles.count}>{running.length}</span>}
-        {intermediate.length > 0 && <span style={{ ...styles.dot, ...styles.dotIntermediate }} />}
-        {intermediate.length > 0 && <span style={styles.count}>{intermediate.length}</span>}
-        {waiting.length > 0 && <span style={{ ...styles.dot, ...styles.dotWaiting }} />}
-        {waiting.length > 0 && <span style={styles.count}>{waiting.length}</span>}
-        {normal.length > 0 && <span style={{ ...styles.dot, ...styles.dotNormal }} />}
-        {normal.length > 0 && <span style={styles.count}>{normal.length}</span>}
+        {running > 0 && <span style={styles.spinner} />}
+        {running > 0 && <span style={styles.count}>{running}</span>}
+        {intermediate > 0 && <span style={{ ...styles.dot, ...styles.dotIntermediate }} />}
+        {intermediate > 0 && <span style={styles.count}>{intermediate}</span>}
+        {waiting > 0 && <span style={{ ...styles.dot, ...styles.dotWaiting }} />}
+        {waiting > 0 && <span style={styles.count}>{waiting}</span>}
+        {normal > 0 && <span style={{ ...styles.dot, ...styles.dotNormal }} />}
+        {normal > 0 && <span style={styles.count}>{normal}</span>}
       </button>
       {panelOpen && (
         <div style={styles.panel} onMouseEnter={resetCloseTimer}>
