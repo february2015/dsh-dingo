@@ -106,6 +106,7 @@ function ensureStyles(): void {
     '.lv-fb__full:hover { filter: brightness(1.15); }',
     '@keyframes lv-fb-spin { from { transform: rotate(0deg); } to { transform: rotate(360deg); } }',
     '@keyframes lv-fb-pulse { 0%, 100% { opacity: 1; } 50% { opacity: 0.25; } }',
+    '@keyframes lv-fb-border-pulse { 0%, 100% { box-shadow: 0 0 4px var(--lv-fb-pulse-color, transparent); } 50% { box-shadow: 0 0 14px var(--lv-fb-pulse-color, transparent); } }',
   ].join('\n')
   document.head.appendChild(style)
 }
@@ -140,6 +141,31 @@ export function SessionCardRailCompact({ rpc, openSession: openTarget, useSessio
   // Rail 容器与悬浮面板状态
   const railRef = useRef<HTMLDivElement | null>(null)
   const [panelOpen, setPanelOpen] = useState(false)
+  const closeTimer = useRef<ReturnType<typeof setTimeout> | undefined>(undefined)
+
+  /** 打开面板并重置 5 秒自动关闭计时。 */
+  const openPanel = (): void => {
+    setPanelOpen(true)
+    resetCloseTimer()
+  }
+
+  /** 关闭面板并清除自动关闭计时。 */
+  const closePanel = (): void => {
+    setPanelOpen(false)
+    if (closeTimer.current !== undefined) {
+      clearTimeout(closeTimer.current)
+      closeTimer.current = undefined
+    }
+  }
+
+  /** 重置 5 秒自动关闭计时（鼠标在面板上互动时也会续期）。 */
+  const resetCloseTimer = (): void => {
+    if (closeTimer.current !== undefined) clearTimeout(closeTimer.current)
+    closeTimer.current = setTimeout(() => {
+      closeTimer.current = undefined
+      setPanelOpen(false)
+    }, 5000)
+  }
 
   /** 点击卡片：执行中只跳转；结论态跳转并标记「正常」（已看过）。 */
   const handleOpenSession = (card: SessionCardView): void => {
@@ -148,7 +174,7 @@ export function SessionCardRailCompact({ rpc, openSession: openTarget, useSessio
     if (card.status !== 'running') {
       void rpc.call('/dingo', 'feedback', { action: 'mark-seen', sessionId: card.sessionId }).catch(() => {})
     }
-    setPanelOpen(false)
+    closePanel()
   }
 
   /** 关闭完整面板里的卡片：仅移除本次卡片。 */
@@ -217,11 +243,18 @@ export function SessionCardRailCompact({ rpc, openSession: openTarget, useSessio
   useEffect(() => {
     if (!panelOpen) return
     const onDown = (event: MouseEvent): void => {
-      if (railRef.current && !railRef.current.contains(event.target as Node)) setPanelOpen(false)
+      if (railRef.current && !railRef.current.contains(event.target as Node)) closePanel()
     }
     document.addEventListener('mousedown', onDown)
     return () => document.removeEventListener('mousedown', onDown)
   }, [panelOpen])
+
+  // 卸载时清理自动关闭计时器。
+  useEffect(() => {
+    return () => {
+      if (closeTimer.current !== undefined) clearTimeout(closeTimer.current)
+    }
+  }, [])
 
   if (snapshot === undefined || !snapshot.enabled) return null
   const items = snapshot.cards
@@ -238,20 +271,37 @@ export function SessionCardRailCompact({ rpc, openSession: openTarget, useSessio
   const priorityColor = priority === 'error' ? '#ef4444' : priority === 'question' ? '#f59e0b' : priority === 'answered' ? '#22c55e' : undefined
   const pulse = priority ? 'lv-fb-pulse 1s ease-in-out infinite' : undefined
 
+  const summaryStyle: React.CSSProperties = {
+    ...styles.summary,
+    ...(priorityColor
+      ? {
+          borderColor: priorityColor,
+          boxShadow: `0 0 10px ${priorityColor}`,
+          animation: 'lv-fb-border-pulse 1s ease-in-out infinite',
+          ['--lv-fb-pulse-color' as string]: priorityColor,
+        }
+      : {}),
+  }
+
   return (
     <div
       ref={railRef}
       className="lv-fb-rail"
       style={styles.rail}
-      onMouseEnter={() => setPanelOpen(true)}
-      onMouseLeave={() => setPanelOpen(false)}
+      onMouseEnter={openPanel}
+      onMouseLeave={() => {
+        // 不立即关闭：5 秒内保持，超时后自动关闭
+      }}
     >
       <button
         type="button"
-        style={styles.summary}
+        style={summaryStyle}
         title="查看全部会话卡片"
         aria-label="会话卡片统计"
-        onClick={() => setPanelOpen((value) => !value)}
+        onClick={() => {
+          if (panelOpen) closePanel()
+          else openPanel()
+        }}
       >
         {priorityColor && (
           <span style={{ ...styles.dot, background: priorityColor, animation: pulse }} />
@@ -263,7 +313,7 @@ export function SessionCardRailCompact({ rpc, openSession: openTarget, useSessio
         {normal.length > 0 && <span style={styles.count}>{normal.length}</span>}
       </button>
       {panelOpen && (
-        <div style={styles.panel}>
+        <div style={styles.panel} onMouseEnter={resetCloseTimer}>
           {items.map((card) => (
             <DetailedCard
               key={card.sessionId}
