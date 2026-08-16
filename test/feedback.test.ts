@@ -215,3 +215,57 @@ describe('工具函数', () => {
     expect(firstParagraph('# 标题\n第一段 有 内容')).toBe('第一段 有 内容')
   })
 })
+
+describe('2.0 会话卡片（五态 + 排序 + 隐藏）', () => {
+  it('turn/start → running；turn/end completed → answered；同一会话只有一张卡片', async () => {
+    const { engine } = build()
+    engine.handleSessionEvent({ id: 'sess-a' }, sessionEvent('turn/start', { turn: 1 }))
+    expect(engine.cardViews()).toHaveLength(1)
+    expect(engine.cardViews()[0]?.status).toBe('running')
+    engine.handleSessionEvent({ id: 'sess-a' }, sessionEvent('assistant/message', undefined, { message: { content: '构建通过' } }))
+    engine.handleSessionEvent({ id: 'sess-a' }, sessionEvent('turn/end', { reason: { kind: 'completed' } }))
+    await flush()
+    const cards = engine.cardViews()
+    expect(cards).toHaveLength(1)
+    expect(cards[0]?.status).toBe('answered')
+  })
+
+  it('approval/asked → question；markSeen → normal', async () => {
+    const { engine } = build()
+    engine.handleSessionEvent({ id: 'sess-a' }, sessionEvent('approval/asked', { toolName: 'bash' }))
+    expect(engine.cardViews()[0]?.status).toBe('question')
+    expect(engine.markSeen('sess-a')).toBe(true)
+    expect(engine.cardViews()[0]?.status).toBe('normal')
+  })
+
+  it('排序：需关注在前、执行中在中、已看过在后', () => {
+    let now = 1000
+    const { engine } = build({ now: () => now })
+    engine.handleSessionEvent({ id: 'sess-run' }, sessionEvent('turn/start'))
+    now += 100
+    engine.handleSessionEvent({ id: 'sess-done' }, sessionEvent('turn/end', { reason: { kind: 'completed' } }))
+    now += 100
+    engine.handleSessionEvent({ id: 'sess-seen' }, sessionEvent('turn/end', { reason: { kind: 'completed' } }))
+    engine.markSeen('sess-seen')
+    const statuses = engine.cardViews().map((c) => c.status)
+    expect(statuses).toEqual(['answered', 'running', 'normal'])
+  })
+
+  it('正常卡片完成超过 10 分钟后自动隐藏', () => {
+    let now = 1000
+    const { engine } = build({ now: () => now })
+    engine.handleSessionEvent({ id: 'sess-a' }, sessionEvent('turn/end', { reason: { kind: 'completed' } }))
+    engine.markSeen('sess-a')
+    expect(engine.cardViews()).toHaveLength(1)
+    now += 10 * 60 * 1000 + 1
+    expect(engine.cardViews()).toHaveLength(0)
+  })
+
+  it('removeSession 移除对应卡片', () => {
+    const { engine } = build()
+    engine.handleSessionEvent({ id: 'sess-a' }, sessionEvent('turn/start'))
+    expect(engine.cardViews()).toHaveLength(1)
+    engine.removeSession('sess-a')
+    expect(engine.cardViews()).toHaveLength(0)
+  })
+})

@@ -128,6 +128,25 @@ export interface AnnouncementView {
   readonly replayable: boolean;
 }
 
+/** 2.0 会话卡片状态：每活跃会话一张，1:1 对应。 */
+export type SessionCardStatus = 'running' | 'answered' | 'question' | 'error' | 'normal';
+
+/** 2.0 会话卡片视图（client 渲染数据源）。 */
+export interface SessionCardView {
+  /** 会话 id（卡片唯一 key；与对话 1:1）。 */
+  readonly sessionId: string;
+  /** 五态：正在执行 / 有答案 / 有疑问 / 有异常 / 正常（已看过）。 */
+  readonly status: SessionCardStatus;
+  readonly workspaceTitle?: string;
+  readonly sessionTitle?: string;
+  /** 卡片创建时间（活跃开始/首次出现）。 */
+  readonly createdAt: number;
+  /** 最近一次状态/标题更新时间。 */
+  readonly updatedAt: number;
+  /** 进入结论态的时间（结论态排序用；执行态缺省）。 */
+  readonly conclusionAt?: number;
+}
+
 /** 反馈引擎快照（`/dingo.feedback {action:'announcements'}` 与 `/dingo status` 共用）。 */
 export interface FeedbackSnapshot {
   readonly enabled: boolean;
@@ -142,6 +161,8 @@ export interface FeedbackSnapshot {
   readonly queue: readonly AnnouncementView[];
   /** 最近已播（cap 8）。 */
   readonly history: readonly AnnouncementView[];
+  /** 2.0 会话 1:1 卡片快照（排序：结论态在前按 conclusionAt，执行态在后）。 */
+  readonly cards: readonly SessionCardView[];
   readonly lastSpoken?: AnnouncementView;
   /** T-8 音效打磨：提示音档位（soft 柔和默认 / crisp 清脆）。 */
   readonly toneStyle?: 'soft' | 'crisp';
@@ -215,6 +236,8 @@ const REPLAY_BACKOFF_MS = 1500;
 const MAX_REPLAY_COUNT = 2;
 /** 最近已播历史上限。 */
 const HISTORY_CAP = 8;
+/** 2.0：正常（已看过）卡片在完成超过该时长后自动隐藏。 */
+const CARD_HIDE_AFTER_SEEN_MS = 10 * 60 * 1000;
 // ─────────────────────────── 播报模板 ───────────────────────────
 
 /**
@@ -252,6 +275,17 @@ const NO_SUMMARY = '（无摘要）';
 
 // ─────────────────────────── 引擎 ───────────────────────────
 
+/** 2.0 会话卡片内部状态（host 维护）。 */
+interface SessionCardState {
+  readonly sessionId: string;
+  status: SessionCardStatus;
+  workspaceTitle?: string;
+  sessionTitle?: string;
+  readonly createdAt: number;
+  updatedAt: number;
+  conclusionAt?: number;
+}
+
 /**
  * 全局插播反馈引擎（host 决策 + 编排层）。
  *
@@ -267,6 +301,8 @@ export class FeedbackEngine {
   private readonly recent = new Map<string, number>();
   /** 最近已播历史（UI 用）。 */
   private readonly history: AnnouncementView[] = [];
+  /** 2.0 会话卡片映射：sessionId → 卡片状态（1:1）。 */
+  private readonly cards = new Map<string, SessionCardState>();
   /** 正在播报的项。 */
   private active: Announcement | null = null;
   /** tick 是否正在执行（串行闸）。 */
@@ -318,6 +354,7 @@ export class FeedbackEngine {
       activeSessionId: this.activeSessionId,
       queue: this.queue.map((item) => toView(item)),
       history: [...this.history],
+      cards: this.cardViews(),
       lastSpoken: this.history[0],
       toneStyle: cfg.toneStyle ?? 'soft',
     };
@@ -328,11 +365,102 @@ export class FeedbackEngine {
     return this.queue.map((item) => toView(item));
   }
 
+  // ── 2.0 会话卡片 ──
+
+  /**
+   * 会话卡片快照：三组顺序——需关注（answered/question/error）→ 执行中（running）
+   * → 已看过（normal）。正常卡片若已完成超过 10 分钟则自动隐藏。
+   */
+  cardViews(): readonly SessionCardView[] {
+    const now = this.now();
+    const views = [...this.cards.values()]
+      .filter((card) => card.status !== 'normal' || now - (card.conclusionAt ?? card.updatedAt) < CARD_HIDE_AFTER_SEEN_MS)
+      .map((card) => ({
+        sessionId: card.sessionId,
+        status: card.status,
+        workspaceTitle: card.workspaceTitle,
+        sessionTitle: card.sessionTitle,
+        createdAt: card.createdAt,
+        updatedAt: card.updatedAt,
+        conclusionAt: card.conclusionAt,
+      }));
+    views.sort((a, b) => {
+      const group = (status: SessionCardStatus): number => {
+        if (status !== 'running' && status !== 'normal') return 0; // 需关注
+        if (status === 'running') return 1;
+        return 2; // normal
+      };
+      const ga = group(a.status);
+      const gb = group(b.status);
+      if (ga !== gb) return ga - gb;
+      if (ga === 0 || ga === 2) {
+        return (a.conclusionAt ?? a.updatedAt) - (b.conclusionAt ?? b.updatedAt);
+      }
+      return a.createdAt - b.createdAt;
+    });
+    return views;
+  }
+
+  /** 会话销毁/删除 → 移除对应卡片（2.0 生命周期）。 */
+  removeSession(sessionId: string): void {
+    this.cards.delete(sessionId);
+    this.sessionTitles.delete(sessionId);
+    this.assistantText.delete(sessionId);
+    this.workspaceCache.delete(sessionId);
+  }
+
+  /** × 关闭：仅移除本次卡片，下次状态变化重新出现。 */
+  dismissCard(sessionId: string | undefined): boolean {
+    if (sessionId === undefined) return false;
+    return this.cards.delete(sessionId);
+  }
+
+  /** 用户看过结论态：有答案/有疑问/有异常 → 正常（已看过）。 */
+  markSeen(sessionId: string | undefined): boolean {
+    if (sessionId === undefined) return false;
+    const card = this.cards.get(sessionId);
+    if (!card || card.status === 'running' || card.status === 'normal') return false;
+    card.status = 'normal';
+    card.updatedAt = this.now();
+    return true;
+  }
+
+  /** 设置/更新一张卡片的状态（不存在则创建；执行态清除结论时间）。 */
+  private setCardStatus(sessionId: string, status: SessionCardStatus): void {
+    const now = this.now();
+    const existing = this.cards.get(sessionId);
+    if (existing) {
+      existing.status = status;
+      existing.updatedAt = now;
+      existing.conclusionAt = status === 'running' ? undefined : now;
+      return;
+    }
+    this.cards.set(sessionId, {
+      sessionId,
+      status,
+      createdAt: now,
+      updatedAt: now,
+      conclusionAt: status === 'running' ? undefined : now,
+    });
+  }
+
+  /** 会话标题/工作区标题已知时补到卡片上（不创建卡片）。 */
+  private updateCardMeta(sessionId: string, patch: { workspaceTitle?: string; sessionTitle?: string }): void {
+    const card = this.cards.get(sessionId);
+    if (!card) return;
+    if (patch.workspaceTitle !== undefined) card.workspaceTitle = patch.workspaceTitle;
+    if (patch.sessionTitle !== undefined) card.sessionTitle = patch.sessionTitle;
+    card.updatedAt = this.now();
+  }
+
   // ── 事件入口（五事件源） ──
 
   /**
    * `session/event` 处理器（FR-6.1：turn/end + assistant/message → task-done；
    * approval/asked → need-confirm；session/title 记标题缓存）。
+   *
+   * 2.0 同时维护会话 1:1 卡片状态：turn/start → 执行中；
+   * turn/end / approval / ask_user / questions → 对应结论态。
    */
   handleSessionEvent(session: { id: string; header?: { cwd?: string } }, event: SessionEventLike): void {
     if (!this.deps.config.enabled) return;
@@ -340,7 +468,14 @@ export class FeedbackEngine {
     switch (event.type) {
       case 'session/title': {
         const title = (event as SessionEventLike & { data?: { title?: string } }).data?.title;
-        if (title) this.sessionTitles.set(sessionId, title);
+        if (title) {
+          this.sessionTitles.set(sessionId, title);
+          this.updateCardMeta(sessionId, { sessionTitle: title });
+        }
+        return;
+      }
+      case 'turn/start': {
+        this.setCardStatus(sessionId, 'running');
         return;
       }
       case 'assistant/message': {
@@ -357,16 +492,23 @@ export class FeedbackEngine {
       }
       case 'turn/end': {
         const reason = (event as SessionEventLike & { data?: { reason?: { kind?: string } } }).data?.reason;
-        if (reason?.kind !== 'completed') return; // aborted/error/max-tokens 不算完成
-        // 当前对话的 turn/end 同样提醒（own 项：只播当/当当提示音、不显示卡片）。
-        // 过程中间回复（assistant/message）不提醒——只有 turn/end（最终回复）
-        // 或提问（approval/ask_user/questions）才算"需要你注意"。
-        const text = this.assistantText.get(sessionId) ?? '';
-        // 含疑问/请求确认 → "需回答"（当当 2 声），否则 "有回复"（当 1 声）
-        if (isQuestionText(text)) {
-          void this.announceNeedConfirm(sessionId, text || '有新内容需要你回答', 'session/turn-end');
+        const kind = reason?.kind;
+        if (kind === 'completed') {
+          // 当前对话的 turn/end 同样提醒（own 项：只播当/当当提示音、不显示卡片）。
+          // 过程中间回复（assistant/message）不提醒——只有 turn/end（最终回复）
+          // 或提问（approval/ask_user/questions）才算"需要你注意"。
+          const text = this.assistantText.get(sessionId) ?? '';
+          // 含疑问/请求确认 → "需回答"（当当 2 声），否则 "有回复"（当 1 声）
+          if (isQuestionText(text)) {
+            this.setCardStatus(sessionId, 'question');
+            void this.announceNeedConfirm(sessionId, text || '有新内容需要你回答', 'session/turn-end');
+          } else {
+            this.setCardStatus(sessionId, 'answered');
+            void this.announceTaskDone(sessionId, session.header?.cwd, text, 'session/turn-end');
+          }
         } else {
-          void this.announceTaskDone(sessionId, session.header?.cwd, text, 'session/turn-end');
+          // aborted / error / max-tokens / blocked / interrupted → 异常结束
+          this.setCardStatus(sessionId, 'error');
         }
         return;
       }
@@ -374,13 +516,20 @@ export class FeedbackEngine {
         const data = (event as SessionEventLike & { data?: { toolName?: string; reason?: string } }).data;
         // 需回答类：当前对话也提醒（用户要看对话里的审批请求；broadcast 只处理文本回复）
         const summary = data?.toolName ? `${data.toolName}${data.reason ? `：${data.reason}` : ''}` : (data?.reason ?? '工具调用');
+        this.setCardStatus(sessionId, 'question');
         void this.announceNeedConfirm(sessionId, summary, 'approval');
+        return;
+      }
+      case 'approval/decided': {
+        // 用户已处理审批，agent 继续执行 → 回到执行中（若尚未 turn/end）
+        this.setCardStatus(sessionId, 'running');
         return;
       }
       case 'tool/call': {
         // dsh-tool-ask-user / ask_user 工具：向用户提问 → 需回答提醒（当前对话也提醒）
         const tool = String((event as SessionEventLike & { data?: { name?: string } }).data?.name ?? '').toLowerCase();
         if (/ask[_-]?user/.test(tool)) {
+          this.setCardStatus(sessionId, 'question');
           void this.announceNeedConfirm(sessionId, '有新问题需要你回答', 'tool-ask-user');
         }
         return;
@@ -399,6 +548,7 @@ export class FeedbackEngine {
     if (snapshot.status === 'completed') {
       void this.announceTaskDone(sessionId, undefined, label, 'jobs');
     } else if (snapshot.status === 'failed') {
+      if (sessionId !== undefined) this.setCardStatus(sessionId, 'error');
       void this.announceTaskError(sessionId, label, snapshot.detail ?? '任务执行失败', 'jobs');
     }
     // killed → 不播
@@ -410,6 +560,7 @@ export class FeedbackEngine {
     const sessionId = input.sessionId;
     const first = input.questions[0];
     const summary = first?.text?.trim() || first?.title?.trim() || '有新问题需要你回答';
+    if (sessionId !== undefined) this.setCardStatus(sessionId, 'question');
     void this.announceNeedConfirm(sessionId, summary, 'questions');
   }
 
@@ -449,6 +600,8 @@ export class FeedbackEngine {
   /** 客户端上报「正在听的会话」（别会话判定用）。 */
   setActiveSession(sessionId: string | undefined): void {
     this.activeSessionId = sessionId === '' ? undefined : sessionId;
+    // 2.0：用户已进入该对话 = 已看过；结论态自动变「正常」（执行中除外）
+    if (this.activeSessionId !== undefined) this.markSeen(this.activeSessionId);
   }
 
   /** `/dingo dnd on|off`：切换免打扰（任务类静音、确认类仍播）。 */
@@ -913,6 +1066,13 @@ export function installFeedback(
       engine.handleSessionEvent(session, event);
     }),
   'dsh-dingo: feedback session/event');
+
+  // 1.1) session/disposed（会话销毁/删除 → 对应卡片移除）
+  ctx.effect(() =>
+    ctx.on('session/disposed', (session: SessionLike) => {
+      engine.removeSession(String(session.id));
+    }),
+  'dsh-dingo: feedback session/disposed');
 
   // 2) jobs 域 settled（守卫缺失：无 ctx.jobs 的宿主不接 jobs 源）
   const jobs = ctx.get('jobs') as { onJobDone?: (listener: (snapshot: JobSnapshotLike) => void) => () => void } | undefined;

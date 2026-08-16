@@ -6,6 +6,7 @@
  * | feedback | 插播队列快照 / 关闭 / 重播 / 播完上报 / 打断 / 上报当前会话 |
  * | set-current-session | 客户端上报"当前查看的对话"（当/当当 判定用） |
  * | set-visibility | 客户端上报"DSH Web UI 前台可见性"（决定是否发系统通知） |
+ * | auto-name | 对话自动命名（header 按钮 / agent 指令共用） |
  *
  * 跳转说明：卡片点击跳转改由 client 侧 `sessions.open` 直接完成（与侧边栏
  * 点击同一入口），host 端不再需要 /dingo.switch 解析工作区（已移除）。
@@ -15,6 +16,7 @@
 import type { Context } from '@deepseek-ai/cordis';
 import type { ChannelAuthority } from './types.ts';
 import type { FeedbackEngine, FeedbackSnapshot } from './feedback.ts';
+import { autoNameSession } from './auto-name.ts';
 
 /** RPC 校验/业务错误。 */
 export class RpcError extends Error {
@@ -63,6 +65,19 @@ export function installDingoRpc(ctx: Context, deps: DingoRpcDeps, authority: Cha
           deps.setWebVisible?.(record.visible === true);
           return { ok: true, value: { visible: record.visible === true } };
         }
+        case 'auto-name': {
+          // 2.0 对话自动命名：header 按钮 / agent 自然语言指令共用同一 host 服务。
+          const record = (typeof payload === 'object' && payload !== null ? payload : {}) as Record<string, unknown>;
+          const sid = typeof record.sessionId === 'string' && record.sessionId !== '' ? record.sessionId : undefined;
+          if (!sid) {
+            return { ok: false, error: { code: 'internal', message: 'sessionId 必填', details: {} } };
+          }
+          const result = await autoNameSession(ctx, sid);
+          if (!result.ok) {
+            return { ok: false, error: { code: 'internal', message: result.error ?? 'auto-name failed', details: {} } };
+          }
+          return { ok: true, value: { title: result.title } };
+        }
         default:
           return {
             ok: false,
@@ -88,7 +103,9 @@ export interface FeedbackRpcRequest {
     | 'replay'
     | 'spoken'
     | 'interrupt'
-    | 'set-active-session';
+    | 'set-active-session'
+    | 'dismiss-card'
+    | 'mark-seen';
   readonly id?: string;
   readonly sessionId?: string;
 }
@@ -116,6 +133,12 @@ function handleFeedbackEndpoint(engine: FeedbackEngine, payload: unknown): { ok:
     case 'set-active-session':
       engine.setActiveSession(request.sessionId);
       return { ok: true, value: { ok: true } };
+    case 'dismiss-card':
+      // 2.0 × 关闭：仅移除本次卡片
+      return { ok: true, value: { ok: engine.dismissCard(request.sessionId) } };
+    case 'mark-seen':
+      // 2.0 点击结论态卡片：已看过 → 正常
+      return { ok: true, value: { ok: engine.markSeen(request.sessionId) } };
   }
 }
 
@@ -126,9 +149,9 @@ function validateFeedbackPayload(payload: unknown): FeedbackRpcRequest {
   }
   const record = payload as Record<string, unknown>;
   const action = record.action;
-  const known = new Set<FeedbackRpcRequest['action']>(['announcements', 'dismiss', 'replay', 'spoken', 'interrupt', 'set-active-session']);
+  const known = new Set<FeedbackRpcRequest['action']>(['announcements', 'dismiss', 'replay', 'spoken', 'interrupt', 'set-active-session', 'dismiss-card', 'mark-seen']);
   if (typeof action !== 'string' || !known.has(action as FeedbackRpcRequest['action'])) {
-    throw new RpcError('bad-request', `action 非法：${String(action)}（支持 announcements/dismiss/replay/spoken/interrupt/set-active-session）`);
+    throw new RpcError('bad-request', `action 非法：${String(action)}（支持 announcements/dismiss/replay/spoken/interrupt/set-active-session/dismiss-card/mark-seen）`);
   }
   if (record.id !== undefined && typeof record.id !== 'string') {
     throw new RpcError('bad-request', 'id 必须是字符串');
