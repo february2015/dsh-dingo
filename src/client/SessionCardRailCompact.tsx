@@ -122,17 +122,24 @@ export interface SessionCardRailCompactProps {
    * - `byId`：各会话 displayTitle（与侧边栏同一数据源，卡片标题兜底）。
    */
   useSessions?: <T>(selector: (s: SessionListState) => T) => T | undefined
+  /**
+   * 框架标准钩子：读取当前会话输入框状态，用于识别“已输入但未发送”的草稿态。
+   */
+  useInput?: <T>(selector: (s: { draft?: string }) => T) => T | undefined
 }
 
 /**
  * 紧凑统计 Rail：内嵌只显示一个统计胶囊，悬停/点击弹出详细卡片面板。
  */
-export function SessionCardRailCompact({ rpc, openSession: openTarget, useSessions }: SessionCardRailCompactProps): JSX.Element | null {
+export function SessionCardRailCompact({ rpc, openSession: openTarget, useSessions, useInput }: SessionCardRailCompactProps): JSX.Element | null {
   const [snapshot, setSnapshot] = useState<FeedbackSnapshotView | undefined>(undefined)
   /** 当前打开的对话（框架注入；上报 host 用于"当前对话当/当当"判定）。 */
   const currentSessionId = useSessions?.((s) => s.current)
   /** 各会话 displayTitle（与侧边栏同一数据源；host 标题缺失时卡片兜底显示）。 */
   const sessionTitles = useSessions?.((s) => s.byId)
+  /** 当前会话输入框草稿（未发送内容）；用于识别“草稿态”。 */
+  const draft = useInput?.((s) => s.draft) ?? ''
+  const hasDraft = typeof draft === 'string' && draft.trim().length > 0
   // 已播放过提示音的 speaking 项（每 id 一次）
   const tonePlayed = useRef(new Set<string>())
   // 见过 speaking 的项（speaking → 消失 的过渡只报一次 spoken）
@@ -266,9 +273,10 @@ export function SessionCardRailCompact({ rpc, openSession: openTarget, useSessio
   const running = items.filter((card) => card.status === 'running')
   const normal = items.filter((card) => card.status === 'normal')
   const needsTotal = errors.length + questions.length + answers.length
-  const priority = errors.length > 0 ? 'error' : questions.length > 0 ? 'question' : answers.length > 0 ? 'answered' : undefined
+  const priority = errors.length > 0 ? 'error' : questions.length > 0 ? 'question' : hasDraft ? 'draft' : answers.length > 0 ? 'answered' : undefined
+  const priorityCount = priority === 'draft' ? 1 : needsTotal
 
-  const priorityColor = priority === 'error' ? '#ef4444' : priority === 'question' ? '#f59e0b' : priority === 'answered' ? '#22c55e' : undefined
+  const priorityColor = priority === 'error' ? '#ef4444' : priority === 'question' ? '#f59e0b' : priority === 'draft' ? '#a855f7' : priority === 'answered' ? '#22c55e' : undefined
   const pulse = priority ? 'lv-fb-pulse 1s ease-in-out infinite' : undefined
 
   const summaryStyle: React.CSSProperties = {
@@ -307,7 +315,7 @@ export function SessionCardRailCompact({ rpc, openSession: openTarget, useSessio
         {priorityColor && (
           <span style={{ ...styles.dot, background: priorityColor, animation: pulse }} />
         )}
-        {needsTotal > 0 && <span style={styles.count}>{needsTotal}</span>}
+        {priorityCount > 0 && <span style={styles.count}>{priorityCount}</span>}
         {running.length > 0 && <span style={styles.spinner} />}
         {running.length > 0 && <span style={styles.count}>{running.length}</span>}
         {normal.length > 0 && <span style={{ ...styles.dot, ...styles.dotNormal }} />}
@@ -320,6 +328,7 @@ export function SessionCardRailCompact({ rpc, openSession: openTarget, useSessio
               key={card.sessionId}
               card={card}
               sessionTitles={sessionTitles as Record<string, { displayTitle?: string }> | undefined}
+              isDraft={card.sessionId === currentSessionId && hasDraft}
               onOpen={handleOpenSession}
               onDismiss={handleDismiss}
             />
@@ -334,11 +343,13 @@ export function SessionCardRailCompact({ rpc, openSession: openTarget, useSessio
 function DetailedCard({
   card,
   sessionTitles,
+  isDraft,
   onOpen,
   onDismiss,
 }: {
   card: SessionCardView
   sessionTitles?: Record<string, { displayTitle?: string }>
+  isDraft?: boolean
   onOpen: (card: SessionCardView) => void
   onDismiss: (sessionId: string) => void
 }): JSX.Element {
@@ -346,14 +357,21 @@ function DetailedCard({
   return (
     <div
       className={`lv-fb__full lv-fb--${card.status}`}
-      style={{ ...styles.full, ...statusCardStyle(card.status) }}
+      style={{
+        ...styles.full,
+        ...statusCardStyle(card.status),
+        ...(isDraft ? { borderColor: 'rgba(168,85,247,0.7)', background: 'rgba(60,30,70,0.92)' } : {}),
+      }}
       data-status={card.status}
       onClick={() => onOpen(card)}
     >
       <SessionStatusIcon status={card.status} />
       <span style={styles.body}>
         <span style={styles.workspace}>{truncate(card.workspaceTitle ?? '', 16) || '对话'}</span>
-        <span style={styles.session}>{truncate(title, 20) || '（未命名对话）'}</span>
+        <span style={styles.session}>
+          {truncate(title, 20) || '（未命名对话）'}
+          {isDraft ? ' ✎' : ''}
+        </span>
       </span>
       <button
         type="button"
