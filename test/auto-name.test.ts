@@ -7,6 +7,7 @@ function fakeCtx(overrides: {
   noSessions?: boolean
 } = {}) {
   return {
+    get: () => undefined,
     apiProxy: overrides.noSessions ? undefined : {
       sessions: {
         history: overrides.history ?? (async () => ({
@@ -20,8 +21,8 @@ function fakeCtx(overrides: {
             },
           },
         })),
-        rename: overrides.rename ?? (async (request: { title: string }) => ({
-          result: { ok: true, value: { title: request.title, seq: 1 } },
+        rename: overrides.rename ?? (async (request: { payload: { title: string } }) => ({
+          result: { ok: true, value: { title: request.payload.title, seq: 1 } },
         })),
       },
     },
@@ -32,9 +33,9 @@ describe('autoNameSession', () => {
   it('从最近 user 消息生成标题并调用 rename', async () => {
     let renamed = ''
     const ctx = fakeCtx({
-      rename: async (request: { title: string }) => {
-        renamed = request.title
-        return { result: { ok: true, value: { title: request.title, seq: 1 } } }
+      rename: async (request: { payload: { title: string } }) => {
+        renamed = request.payload.title
+        return { result: { ok: true, value: { title: request.payload.title, seq: 1 } } }
       },
     }) as never
     const result = await autoNameSession(ctx as never, 'sess-1')

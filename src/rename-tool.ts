@@ -48,13 +48,23 @@ export function installRenameTool(ctx: Context): void {
     async execute(args: any, exec: any): Promise<{ ok: boolean; title: string }> {
       const sessionId = String(exec?.agent?.session?.id ?? exec?.agent?.id ?? '')
       if (!sessionId) throw new Error('无法确定当前会话')
-      const api = (ctx as unknown as { apiProxy?: { sessions?: { rename(request: { sessionId: string; title: string }): Promise<{ result: { ok: boolean; value?: { title: string }; error?: { message?: string } } }> } } }).apiProxy
+      const api = (ctx as unknown as { apiProxy?: { sessions?: { rename(request: { rpcId: unknown; payload: { sessionId: string; title: string } }): Promise<{ result: { ok: boolean; value?: { title: string }; error?: { message?: string } } }> } } }).apiProxy
       if (!api?.sessions?.rename) throw new Error('重命名服务不可用')
-      const result = await api.sessions.rename({ sessionId, title: String(args.title) })
+      const result = await api.sessions.rename({
+        rpcId: makeRpcId(),
+        payload: { sessionId, title: String(args.title) },
+      })
       if (!result.result.ok) throw new Error(result.result.error?.message ?? '重命名失败')
       return { ok: true, title: result.result.value?.title ?? String(args.title) }
     },
   }
 
   ctx.effect(() => tools.register(tool), 'dsh-dingo: rename tool')
+}
+
+/** 生成一次宿主 RPC 调用 id。 */
+function makeRpcId(): string {
+  return typeof globalThis.crypto?.randomUUID === 'function'
+    ? globalThis.crypto.randomUUID()
+    : `${Date.now()}-${Math.random().toString(36).slice(2)}`
 }

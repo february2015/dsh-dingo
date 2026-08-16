@@ -80,12 +80,12 @@ export function apply(ctx: ClientContext): void {
     }
   }, 'dsh-dingo: visibility report')
 
-  // 2.0 卡片 Rail：挂载到对话头部操作行最左侧（负 order）。
+  // 2.0 卡片 Rail：放在自动命名按钮右侧。
   ctx.effect(() => {
     return ctx.slots.inject('conversation.session.header.actions', () => ctx.slots.register({
       name: 'conversation.session.header.actions',
       id: 'dsh-dingo-card-rail',
-      order: -100,
+      order: 100,
       inject: () => ({
         rpc,
         openSession: (sessionId: string) => {
@@ -99,12 +99,12 @@ export function apply(ctx: ClientContext): void {
     }, SessionCardRail as unknown as (props: SessionCardRailProps) => JSX.Element))
   }, 'dsh-dingo: session card rail slot')
 
-  // 2.0 自动命名按钮：挂在头部操作行常规操作之后（正 order）。
+  // 2.0 自动命名按钮：放在卡片 Rail 左侧。
   ctx.effect(() => {
     return ctx.slots.inject('conversation.session.header.actions', () => ctx.slots.register({
       name: 'conversation.session.header.actions',
       id: 'dsh-dingo-auto-name',
-      order: 100,
+      order: -100,
       inject: () => ({ rpc }),
     }, AutoNameButton as unknown as (props: AutoNameButtonProps) => JSX.Element))
   }, 'dsh-dingo: auto name button slot')

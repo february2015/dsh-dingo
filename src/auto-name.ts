@@ -18,14 +18,14 @@ export interface AutoNameResult {
 
 /** 会话历史/重命名 API 的最小形状（避免强耦合）。 */
 interface SessionsApiLike {
-  history(request: { sessionId: string; maxMessages?: number }): Promise<{
+  history(request: { rpcId: unknown; payload: { sessionId: string; maxMessages?: number } }): Promise<{
     result: {
       ok: boolean
       value?: { events?: readonly HistoryEntryLike[] }
       error?: { message?: string }
     }
   }>
-  rename(request: { sessionId: string; title: string }): Promise<{
+  rename(request: { rpcId: unknown; payload: { sessionId: string; title: string } }): Promise<{
     result: {
       ok: boolean
       value?: { title: string }
@@ -48,7 +48,8 @@ export async function autoNameSession(ctx: Context, sessionId: string): Promise<
     return { ok: false, error: '自动命名不可用：缺少 apiProxy.sessions' }
   }
 
-  const history = await api.sessions.history({ sessionId, maxMessages: 20 })
+  const rpcId = makeRpcId()
+  const history = await api.sessions.history({ rpcId, payload: { sessionId, maxMessages: 20 } })
   if (!history.result.ok || !history.result.value) {
     return { ok: false, error: history.result.error?.message ?? '读取会话历史失败' }
   }
@@ -59,7 +60,7 @@ export async function autoNameSession(ctx: Context, sessionId: string): Promise<
     return { ok: false, error: '未能从对话内容生成有效标题' }
   }
 
-  const renamed = await api.sessions.rename({ sessionId, title })
+  const renamed = await api.sessions.rename({ rpcId, payload: { sessionId, title } })
   if (!renamed.result.ok) {
     return { ok: false, error: renamed.result.error?.message ?? '写入标题失败' }
   }
@@ -105,7 +106,7 @@ function extractText(content: any): string {
  * 依赖宿主已装配 `ctx.llm`；不可用或生成失败时返回 undefined，由规则回退接管。
  */
 async function generateTitleWithLlm(ctx: Context, texts: string[]): Promise<string | undefined> {
-  const llm = (ctx as unknown as { llm?: { stream(options: unknown): AsyncIterable<{ type: string; text?: string }> } }).llm
+  const llm = ctx.get('llm') as { stream(options: unknown): AsyncIterable<{ type: string; text?: string }> } | undefined
   if (!llm?.stream || texts.length === 0) return undefined
 
   const prompt = [
@@ -156,4 +157,11 @@ function generateTitle(texts: string[]): string | undefined {
   const candidate = clean(userText)
   if (!candidate) return undefined
   return candidate.length <= 20 ? candidate : `${candidate.slice(0, 20)}…`
+}
+
+/** 生成一次宿主 RPC 调用 id。 */
+function makeRpcId(): string {
+  return typeof globalThis.crypto?.randomUUID === 'function'
+    ? globalThis.crypto.randomUUID()
+    : `${Date.now()}-${Math.random().toString(36).slice(2)}`
 }
