@@ -128,6 +128,25 @@ export interface SessionCardRailCompactProps {
   useInput?: <T>(selector: (s: { draft?: string }) => T) => T | undefined
 }
 
+/** 草稿态排序：异常 > 疑问 > 草稿 > 待阅读 > 执行中 > 正常。 */
+function cardRank(card: SessionCardView, currentSessionId?: string, hasDraft?: boolean): number {
+  const isDraft = hasDraft && card.sessionId === currentSessionId
+  switch (card.status) {
+    case 'error':
+      return 0
+    case 'question':
+      return 1
+    case 'answered':
+      return isDraft ? 2 : 3
+    case 'running':
+      return isDraft ? 2 : 4
+    case 'normal':
+      return isDraft ? 2 : 5
+    default:
+      return 6
+  }
+}
+
 /**
  * 紧凑统计 Rail：内嵌只显示一个统计胶囊，悬停/点击弹出详细卡片面板。
  */
@@ -267,6 +286,11 @@ export function SessionCardRailCompact({ rpc, openSession: openTarget, useSessio
   const items = snapshot.cards
   if (items.length === 0) return null
 
+  // 草稿态是 client 侧状态，排序时手动插到“执行中”之前。
+  const sortedItems = [...items].sort(
+    (a, b) => cardRank(a, currentSessionId, hasDraft) - cardRank(b, currentSessionId, hasDraft),
+  )
+
   const errors = items.filter((card) => card.status === 'error')
   const questions = items.filter((card) => card.status === 'question')
   const answers = items.filter((card) => card.status === 'answered')
@@ -323,7 +347,7 @@ export function SessionCardRailCompact({ rpc, openSession: openTarget, useSessio
       </button>
       {panelOpen && (
         <div style={styles.panel} onMouseEnter={resetCloseTimer}>
-          {items.map((card) => (
+          {sortedItems.map((card) => (
             <DetailedCard
               key={card.sessionId}
               card={card}
