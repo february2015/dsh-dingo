@@ -371,7 +371,13 @@ export function SessionCardRailCompact({ rpc, openSession: openTarget, useSessio
       updatedAt: Date.now(),
     })
   }
-  const panelItems = syntheticCards.length > 0 ? [...items, ...syntheticCards] : items
+  // 防御性去重：避免同一个会话因 host 卡片 + 客户端补卡出现两张。
+  const seenPanel = new Set<string>()
+  const panelItems = [...items, ...syntheticCards].filter((card) => {
+    if (seenPanel.has(card.sessionId)) return false
+    seenPanel.add(card.sessionId)
+    return true
+  })
 
   // 等待状态 = 后台任务/子任务，或 TaskSwarm 蜂群批次。
   const isWaiting = (sessionId: string): boolean =>
