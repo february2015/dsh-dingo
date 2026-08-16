@@ -484,8 +484,7 @@ export function SessionCardRailCompact({ rpc, openSession: openTarget, useSessio
               card={card}
               sessionTitles={sessionTitles as Record<string, { displayTitle?: string }> | undefined}
               isCurrent={card.sessionId === currentSessionId}
-              isDraft={hasDraftFor(card.sessionId)}
-              isWaiting={isWaiting(card.sessionId)}
+              bucket={summaryBucket(card, currentSessionId, hasDraftFor, isWaiting)}
               dsJobsCount={backgroundJobCount(card.sessionId)}
               swarmWaveCounts={card.swarmWaveCounts ?? []}
               onOpen={handleOpenSession}
@@ -503,8 +502,7 @@ function DetailedCard({
   card,
   sessionTitles,
   isCurrent,
-  isDraft,
-  isWaiting,
+  bucket,
   dsJobsCount,
   swarmWaveCounts,
   onOpen,
@@ -513,8 +511,7 @@ function DetailedCard({
   card: SessionCardView
   sessionTitles?: Record<string, { displayTitle?: string; cwd?: string }>
   isCurrent?: boolean
-  isDraft?: boolean
-  isWaiting?: boolean
+  bucket?: 'error' | 'question' | 'draft' | 'answered' | 'waiting' | 'intermediate' | 'running' | 'normal'
   dsJobsCount?: number
   swarmWaveCounts?: number[]
   onOpen: (card: SessionCardView) => void
@@ -523,16 +520,12 @@ function DetailedCard({
   const title = card.sessionTitle ?? sessionTitles?.[card.sessionId]?.displayTitle ?? ''
   const cwd = sessionTitles?.[card.sessionId]?.cwd
   const workspaceTitle = card.workspaceTitle ?? (cwd ? basename(cwd) : undefined)
-  const intermediate = card.status === 'running' && card.hasIntermediate
   return (
     <div
       className={`lv-fb__full lv-fb--${card.status}`}
       style={{
         ...styles.full,
-        ...statusCardStyle(card.status),
-        ...(isDraft ? { borderColor: 'rgba(168,85,247,0.7)', background: 'rgba(60,30,70,0.92)' } : {}),
-        ...(isWaiting ? { borderColor: 'rgba(20,184,166,0.7)', background: 'rgba(15,55,50,0.92)' } : {}),
-        ...(intermediate ? { borderColor: 'rgba(34,211,238,0.6)', background: 'rgba(15,45,60,0.92)' } : {}),
+        ...bucketCardStyle(bucket, card.status),
       }}
       data-status={card.status}
       onClick={() => onOpen(card)}
@@ -560,9 +553,9 @@ function DetailedCard({
         </span>
         <span style={styles.session}>
           {truncate(title, 20) || '（未命名对话）'}
-          {isDraft ? ' ✎' : ''}
-          {isWaiting ? ' ⏳' : ''}
-          {intermediate ? ' ↻' : ''}
+          {bucket === 'draft' ? ' ✎' : ''}
+          {bucket === 'waiting' ? ' ⏳' : ''}
+          {bucket === 'intermediate' ? ' ↻' : ''}
         </span>
       </span>
       <button
@@ -594,6 +587,23 @@ function statusCardStyle(status: SessionCardStatus): React.CSSProperties {
       return { borderColor: 'rgba(239,68,68,0.6)', background: 'rgba(60,25,25,0.92)' }
     default:
       return { borderColor: 'rgba(156,163,175,0.4)', background: 'rgba(40,42,48,0.92)' }
+  }
+}
+
+/** 按互斥统计桶决定卡片视觉，保证“统计看到什么颜色，卡片就是什么颜色”。 */
+function bucketCardStyle(
+  bucket: 'error' | 'question' | 'draft' | 'answered' | 'waiting' | 'intermediate' | 'running' | 'normal' | undefined,
+  fallback: SessionCardStatus,
+): React.CSSProperties {
+  switch (bucket) {
+    case 'draft':
+      return { borderColor: 'rgba(168,85,247,0.7)', background: 'rgba(60,30,70,0.92)' }
+    case 'waiting':
+      return { borderColor: 'rgba(20,184,166,0.7)', background: 'rgba(15,55,50,0.92)' }
+    case 'intermediate':
+      return { borderColor: 'rgba(34,211,238,0.6)', background: 'rgba(15,45,60,0.92)' }
+    default:
+      return statusCardStyle(bucket ?? fallback)
   }
 }
 
