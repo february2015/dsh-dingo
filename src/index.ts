@@ -19,6 +19,7 @@ import z from '@deepseek-ai/schemastery';
 import { installFeedback, type FeedbackAudio, type FeedbackEngine, type FeedbackInstallOptions, type AnnouncementView } from './feedback.ts';
 import { installDingoRpc } from './rpc.ts';
 import { registerDingoCommand } from './command.ts';
+import { autoNameSession } from './auto-name.ts';
 import { sendSystemNotification } from './sysnotify.ts';
 import type { ChannelAuthority } from './types.ts';
 
@@ -147,5 +148,6 @@ export function apply(ctx: Context, config: unknown): void {
       setDnd: (value: boolean) => feedback.setDnd(value),
       dnd: () => feedback.snapshot().dnd,
     },
+    autoName: (sessionId) => autoNameSession(ctx, sessionId),
   });
 }

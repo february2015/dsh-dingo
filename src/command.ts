@@ -1,10 +1,11 @@
 /**
- * `/dingo` 斜杠命令（on|off|status|dnd）。
+ * `/dingo` 斜杠命令（on|off|status|dnd|rename）。
  *
  * - `on` / `off`：切换提醒功能运行时开关；
  * - `status`：报告开关、DND、插播队列（当前/其他对话提醒计数）；
  * - `dnd on|off`：免打扰切换（任务完成类静音、确认类默认仍播）；
- *   `dnd`（无参）= 查询。
+ *   `dnd`（无参）= 查询；
+ * - `rename` / `auto-name`：自动命名当前对话（与按钮同一套 host 逻辑）。
  *
  * @module dsh-dingo/command
  */
@@ -21,6 +22,8 @@ export interface DingoCommandDeps {
     setDnd(value: boolean): boolean;
     feedback(): ReturnType<FeedbackEngine['snapshot']>;
   };
+  /** 自动命名当前会话（host 侧同一套逻辑）。 */
+  readonly autoName?: (sessionId: string) => Promise<{ ok: boolean; title?: string; error?: string }>;
 }
 
 /** 注册 `/dingo` 命令（headless 无命令注册表时静默跳过）。 */
@@ -29,8 +32,8 @@ export function registerDingoCommand(ctx: Context, deps: DingoCommandDeps): void
   if (commands === undefined) return; // headless deployments without the command registry
   commands.register({
     name: 'dingo',
-    description: 'dsh-dingo: on|off|status|dnd',
-    input: { hint: 'on | off | status | dnd [on|off]' },
+    description: 'dsh-dingo: on|off|status|dnd|rename',
+    input: { hint: 'on | off | status | dnd [on|off] | rename' },
     handler: (invocation) => dingoCommand(invocation, deps),
   });
 }
@@ -51,7 +54,18 @@ async function dingoCommand(invocation: CommandInvocation, deps: DingoCommandDep
     const tip = dnd ? '免打扰已开启：任务完成类提醒静音（需回答仍提醒）。' : '免打扰已关闭。';
     return { kind: 'success', text: `dsh-dingo dnd: ${dnd ? 'on' : 'off'}. ${tip}` };
   }
-  return { kind: 'error', text: 'dsh-dingo: unknown argument — use on | off | status | dnd [on|off].' };
+  if (raw === 'rename' || raw === 'auto-name') {
+    if (!deps.autoName) {
+      return { kind: 'error', text: 'dsh-dingo: auto-name 不可用（缺少 autoName 依赖）' };
+    }
+    const sessionId = String(invocation.agent.session.id);
+    const result = await deps.autoName(sessionId);
+    if (!result.ok) {
+      return { kind: 'error', text: `dsh-dingo: 自动命名失败 — ${result.error ?? '未知错误'}` };
+    }
+    return { kind: 'success', text: `已重命名为：${result.title}` };
+  }
+  return { kind: 'error', text: 'dsh-dingo: unknown argument — use on | off | status | dnd [on|off] | rename.' };
 }
 
 /** 组装 `/dingo status` 文案。 */
