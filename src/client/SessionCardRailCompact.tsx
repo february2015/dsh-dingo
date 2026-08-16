@@ -1,12 +1,14 @@
 /**
- * dsh-dingo 2.0 — 会话卡片 Rail（client header actions 槽位）。
+ * dsh-dingo 2.0 — 会话卡片 Rail（紧凑统计 + 悬浮详细面板）。
  *
- * 按 §13 挂载到 `conversation.session.header.actions`：
- * - 不再使用 `findSessionLogAnchor` / fixed 定位；
- * - 内嵌紧凑卡（状态图标 + 工作区·对话名，无关闭按钮）；
- * - 溢出时折叠为 `+N` 箭头，点开悬浮面板显示完整卡片（含 × 关闭）。
+ * 内嵌只保留一个小统计：
+ * - 有未处理异常 → 红色闪烁；
+ * - 无异常但有未处理疑问 → 橙色闪烁；
+ * - 无异常/疑问但有待阅读结论 → 绿色闪烁；
+ * - 全部处理完 → 不闪烁。
+ * 鼠标悬停/点击后向下滑出详细卡片面板，显示完整工作区名、对话名和状态颜色。
  *
- * @module dsh-dingo/client/SessionCardRail
+ * @module dsh-dingo/client/SessionCardRailCompact
  */
 import { useEffect, useRef, useState } from 'react'
 import type { SessionListState } from '@deepseek-ai/dsh-client-runtime/client'
@@ -93,7 +95,7 @@ function playTone(tone: AnnouncementView['tone'], style: ToneStyle | undefined):
   void audio.play().catch(() => {})
 }
 
-/** 注入一次卡片 hover / spinner 样式（内联 style 不支持 :hover / keyframes）。 */
+/** 注入一次卡片 hover / spinner / pulse 样式（内联 style 不支持 :hover / keyframes）。 */
 let stylesInjected = false
 function ensureStyles(): void {
   if (stylesInjected || typeof document === 'undefined') return
@@ -101,14 +103,15 @@ function ensureStyles(): void {
   const style = document.createElement('style')
   style.textContent = [
     '.lv-fb__full { transition: background 0.15s ease, border-color 0.15s ease; }',
-    '.lv-fb__full:hover { background: rgba(24,26,32,0.96) !important; border-color: rgba(120,140,180,0.55); }',
+    '.lv-fb__full:hover { filter: brightness(1.15); }',
     '@keyframes lv-fb-spin { from { transform: rotate(0deg); } to { transform: rotate(360deg); } }',
+    '@keyframes lv-fb-pulse { 0%, 100% { opacity: 1; } 50% { opacity: 0.25; } }',
   ].join('\n')
   document.head.appendChild(style)
 }
 
-/** SessionCardRail 注入面：/dingo RPC 调用器 + 会话跳转 + 会话快照（框架注入）。 */
-export interface SessionCardRailProps {
+/** SessionCardRailCompact 注入面：/dingo RPC 调用器 + 会话跳转 + 会话快照（框架注入）。 */
+export interface SessionCardRailCompactProps {
   rpc: RpcCall
   /** 打开指定会话（卡片点击跳转；由 apply 注入，内部走 sessions.open）。 */
   openSession?: (sessionId: string) => void
@@ -121,10 +124,9 @@ export interface SessionCardRailProps {
 }
 
 /**
- * 会话卡片 Rail：内嵌在对话头部操作行。
- * 数据源仍是 `/dingo.feedback` 的 1:1 卡片快照；这里只负责展示/折叠/交互。
+ * 紧凑统计 Rail：内嵌只显示一个统计胶囊，悬停/点击弹出详细卡片面板。
  */
-export function SessionCardRail({ rpc, openSession: openTarget, useSessions }: SessionCardRailProps): JSX.Element | null {
+export function SessionCardRailCompact({ rpc, openSession: openTarget, useSessions }: SessionCardRailCompactProps): JSX.Element | null {
   const [snapshot, setSnapshot] = useState<FeedbackSnapshotView | undefined>(undefined)
   /** 当前打开的对话（框架注入；上报 host 用于"当前对话当/当当"判定）。 */
   const currentSessionId = useSessions?.((s) => s.current)
@@ -135,10 +137,8 @@ export function SessionCardRail({ rpc, openSession: openTarget, useSessions }: S
   // 见过 speaking 的项（speaking → 消失 的过渡只报一次 spoken）
   const seenSpeaking = useRef(new Set<string>())
   const reportedSpoken = useRef(new Set<string>())
-  // Rail 容器与折叠状态
+  // Rail 容器与悬浮面板状态
   const railRef = useRef<HTMLDivElement | null>(null)
-  const innerRef = useRef<HTMLDivElement | null>(null)
-  const [hiddenCount, setHiddenCount] = useState(0)
   const [panelOpen, setPanelOpen] = useState(false)
 
   /** 点击卡片：执行中只跳转；结论态跳转并标记「正常」（已看过）。 */
@@ -213,43 +213,6 @@ export function SessionCardRail({ rpc, openSession: openTarget, useSessions }: S
     void rpc.call('/dingo', 'set-current-session', { sessionId: currentSessionId }).catch(() => {})
   }, [currentSessionId, rpc])
 
-  // 溢出检测：始终渲染全部卡片，只有空间不足时才把后面的折叠为 +N。
-  useEffect(() => {
-    const el = innerRef.current
-    if (!el) return
-
-    const countFit = (children: HTMLElement[], width: number): number => {
-      let count = 0
-      for (const child of children) {
-        if (child.offsetLeft + child.offsetWidth <= width) count++
-        else break
-      }
-      return count
-    }
-
-    const measure = (): void => {
-      const total = snapshot?.cards.length ?? 0
-      if (total === 0) {
-        setHiddenCount(0)
-        return
-      }
-      const children = Array.from(el.querySelectorAll<HTMLElement>('[data-card-index]'))
-      const rawFit = countFit(children, el.clientWidth)
-      // 只有确实放不下时才预留箭头按钮空间，并且只折叠后面的卡片。
-      const fit = rawFit < total ? countFit(children, Math.max(0, el.clientWidth - 36)) : rawFit
-      setHiddenCount(Math.max(0, total - fit))
-    }
-
-    measure()
-    const ro = new ResizeObserver(measure)
-    ro.observe(el)
-    window.addEventListener('resize', measure)
-    return () => {
-      ro.disconnect()
-      window.removeEventListener('resize', measure)
-    }
-  }, [snapshot?.cards])
-
   // 点击面板外部自动收起。
   useEffect(() => {
     if (!panelOpen) return
@@ -264,86 +227,113 @@ export function SessionCardRail({ rpc, openSession: openTarget, useSessions }: S
   const items = snapshot.cards
   if (items.length === 0) return null
 
+  const errors = items.filter((card) => card.status === 'error')
+  const questions = items.filter((card) => card.status === 'question')
+  const answers = items.filter((card) => card.status === 'answered')
+  const running = items.filter((card) => card.status === 'running')
+  const normal = items.filter((card) => card.status === 'normal')
+  const needsTotal = errors.length + questions.length + answers.length
+  const priority = errors.length > 0 ? 'error' : questions.length > 0 ? 'question' : answers.length > 0 ? 'answered' : undefined
+
+  const priorityColor = priority === 'error' ? '#ef4444' : priority === 'question' ? '#f59e0b' : priority === 'answered' ? '#22c55e' : undefined
+  const pulse = priority ? 'lv-fb-pulse 1s ease-in-out infinite' : undefined
+
   return (
-    <div ref={railRef} className="lv-fb-rail" style={styles.rail}>
-      <div ref={innerRef} style={styles.railInner}>
-        {items.map((card, index) => (
-          <div
-            key={card.sessionId}
-            data-card-index={index}
-            className={`lv-fb__compact lv-fb--${card.status}`}
-            style={styles.compact}
-            title={card.sessionId ? '点击跳转到该对话' : undefined}
-            onClick={() => handleOpenSession(card)}
-          >
-            <SessionStatusIcon status={card.status} />
-            <span style={styles.compactText}>
-              {truncate(
-                card.workspaceTitle
-                  ?? (sessionTitles as Record<string, { displayTitle?: string }> | undefined)?.[card.sessionId]?.displayTitle
-                  ?? '对话',
-                6,
-              )}
-              {card.sessionTitle || (sessionTitles as Record<string, { displayTitle?: string }> | undefined)?.[card.sessionId]?.displayTitle
-                ? `·${truncate(card.sessionTitle ?? (sessionTitles as Record<string, { displayTitle?: string }> | undefined)?.[card.sessionId]?.displayTitle ?? '', 8)}`
-                : ''}
-            </span>
-          </div>
-        ))}
-      </div>
-      {hiddenCount > 0 && (
-        <button
-          type="button"
-          style={styles.more}
-          aria-label={`展开全部卡片（+${hiddenCount}）`}
-          onClick={(event) => {
-            event.stopPropagation()
-            setPanelOpen((value) => !value)
-          }}
-        >
-          +{hiddenCount}
-        </button>
-      )}
+    <div
+      ref={railRef}
+      className="lv-fb-rail"
+      style={styles.rail}
+      onMouseEnter={() => setPanelOpen(true)}
+      onMouseLeave={() => setPanelOpen(false)}
+    >
+      <button
+        type="button"
+        style={styles.summary}
+        title="查看全部会话卡片"
+        aria-label="会话卡片统计"
+        onClick={() => setPanelOpen((value) => !value)}
+      >
+        {priorityColor && (
+          <span style={{ ...styles.dot, background: priorityColor, animation: pulse }} />
+        )}
+        {needsTotal > 0 && <span style={styles.count}>{needsTotal}</span>}
+        {running.length > 0 && <span style={styles.spinner} />}
+        {running.length > 0 && <span style={styles.count}>{running.length}</span>}
+        {normal.length > 0 && <span style={{ ...styles.dot, ...styles.dotNormal }} />}
+        {normal.length > 0 && <span style={styles.count}>{normal.length}</span>}
+      </button>
       {panelOpen && (
         <div style={styles.panel}>
           {items.map((card) => (
-            <div
+            <DetailedCard
               key={card.sessionId}
-              className="lv-fb__full"
-              style={styles.full}
-              data-status={card.status}
-              onClick={() => handleOpenSession(card)}
-            >
-              <SessionStatusIcon status={card.status} />
-              <span style={styles.body}>
-                <span style={styles.workspace}>{truncate(card.workspaceTitle ?? '', 12) || '对话'}</span>
-                <span style={styles.session}>
-                  {truncate(
-                    card.sessionTitle
-                      ?? (sessionTitles as Record<string, { displayTitle?: string }> | undefined)?.[card.sessionId]?.displayTitle
-                      ?? '',
-                    10,
-                  ) || '（未命名对话）'}
-                </span>
-              </span>
-              <button
-                type="button"
-                title="关闭"
-                aria-label="关闭"
-                style={styles.close}
-                onClick={(event) => {
-                  event.stopPropagation()
-                  handleDismiss(card.sessionId)
-                }}
-              >
-                ×
-              </button>
-            </div>
+              card={card}
+              sessionTitles={sessionTitles as Record<string, { displayTitle?: string }> | undefined}
+              onOpen={handleOpenSession}
+              onDismiss={handleDismiss}
+            />
           ))}
         </div>
       )}
     </div>
   )
+}
+
+/** 悬浮面板里的详细卡片：彩色、完整工作区名 + 对话名 + 关闭。 */
+function DetailedCard({
+  card,
+  sessionTitles,
+  onOpen,
+  onDismiss,
+}: {
+  card: SessionCardView
+  sessionTitles?: Record<string, { displayTitle?: string }>
+  onOpen: (card: SessionCardView) => void
+  onDismiss: (sessionId: string) => void
+}): JSX.Element {
+  const title = card.sessionTitle ?? sessionTitles?.[card.sessionId]?.displayTitle ?? ''
+  return (
+    <div
+      className={`lv-fb__full lv-fb--${card.status}`}
+      style={{ ...styles.full, ...statusCardStyle(card.status) }}
+      data-status={card.status}
+      onClick={() => onOpen(card)}
+    >
+      <SessionStatusIcon status={card.status} />
+      <span style={styles.body}>
+        <span style={styles.workspace}>{truncate(card.workspaceTitle ?? '', 16) || '对话'}</span>
+        <span style={styles.session}>{truncate(title, 20) || '（未命名对话）'}</span>
+      </span>
+      <button
+        type="button"
+        title="关闭"
+        aria-label="关闭"
+        style={styles.close}
+        onClick={(event) => {
+          event.stopPropagation()
+          onDismiss(card.sessionId)
+        }}
+      >
+        ×
+      </button>
+    </div>
+  )
+}
+
+/** 状态 → 卡片边框/背景色（不同颜色便于区分）。 */
+function statusCardStyle(status: SessionCardStatus): React.CSSProperties {
+  switch (status) {
+    case 'running':
+      return { borderColor: 'rgba(96,165,250,0.55)', background: 'rgba(30,41,59,0.92)' }
+    case 'answered':
+      return { borderColor: 'rgba(34,197,94,0.55)', background: 'rgba(20,50,35,0.92)' }
+    case 'question':
+      return { borderColor: 'rgba(245,158,11,0.6)', background: 'rgba(60,45,20,0.92)' }
+    case 'error':
+      return { borderColor: 'rgba(239,68,68,0.6)', background: 'rgba(60,25,25,0.92)' }
+    default:
+      return { borderColor: 'rgba(156,163,175,0.4)', background: 'rgba(40,42,48,0.92)' }
+  }
 }
 
 /** 内联样式（无样式系统依赖；宿主样式可覆盖 lv-fb 类）。 */
@@ -353,58 +343,49 @@ const styles: Record<string, React.CSSProperties> = {
     display: 'inline-flex',
     alignItems: 'center',
     flex: 'none',
-    maxWidth: '100%',
   },
-  railInner: {
+  summary: {
     display: 'inline-flex',
     alignItems: 'center',
     gap: 4,
-    maxWidth: '100%',
-    minWidth: 0,
-    overflow: 'hidden',
-    flex: '0 1 auto',
-  },
-  compact: {
-    flex: '0 0 auto',
-    display: 'inline-flex',
-    alignItems: 'center',
-    gap: 4,
-    maxWidth: 130,
     height: 28,
-    padding: '0 8px',
-    boxSizing: 'border-box',
+    minWidth: 28,
+    padding: '0 10px',
     borderRadius: 999,
+    border: '1px solid rgba(120,140,180,0.35)',
     background: 'rgba(24, 26, 32, 0.7)',
     color: '#e8e8e8',
     fontSize: 11,
     lineHeight: 1,
     cursor: 'pointer',
     whiteSpace: 'nowrap',
-    overflow: 'hidden',
-    textOverflow: 'ellipsis',
-    userSelect: 'none',
-    WebkitUserSelect: 'none',
   },
-  compactText: {
-    overflow: 'hidden',
-    textOverflow: 'ellipsis',
-    whiteSpace: 'nowrap',
+  dot: {
+    display: 'inline-block',
+    width: 8,
+    height: 8,
+    borderRadius: '50%',
+    flex: 'none',
   },
-  more: {
-    position: 'absolute',
-    right: 0,
-    top: '50%',
-    transform: 'translateY(-50%)',
-    zIndex: 1,
-    height: 28,
-    minWidth: 28,
-    padding: '0 8px',
-    borderRadius: 999,
-    border: '1px solid rgba(120,140,180,0.35)',
-    background: 'rgba(24, 26, 32, 0.7)',
-    color: '#e8e8e8',
+  dotNormal: {
+    background: '#9ca3af',
+  },
+  spinner: {
+    display: 'inline-block',
+    width: 10,
+    height: 10,
+    borderRadius: '50%',
+    border: '2px solid rgba(120,140,180,0.4)',
+    borderTopColor: '#60a5fa',
+    animation: 'lv-fb-spin 0.8s linear infinite',
+    boxSizing: 'border-box',
+    flex: 'none',
+  },
+  count: {
     fontSize: 11,
-    cursor: 'pointer',
+    fontWeight: 600,
+    color: '#e8e8e8',
+    lineHeight: 1,
   },
   panel: {
     position: 'absolute',
@@ -415,20 +396,21 @@ const styles: Record<string, React.CSSProperties> = {
     display: 'flex',
     flexDirection: 'column',
     gap: 6,
-    minWidth: 220,
+    minWidth: 260,
+    maxHeight: '70vh',
+    overflowY: 'auto',
     padding: 8,
     borderRadius: 10,
-    background: 'rgba(20, 22, 28, 0.96)',
+    background: 'rgba(20, 22, 28, 0.97)',
     boxShadow: '0 8px 30px rgba(0,0,0,0.45)',
   },
   full: {
     display: 'flex',
     alignItems: 'center',
     gap: 8,
-    width: 220,
+    width: 260,
     minHeight: 56,
     boxSizing: 'border-box',
-    background: 'rgba(24, 26, 32, 0.9)',
     color: '#e8e8e8',
     borderRadius: 8,
     padding: '8px 10px',

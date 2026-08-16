@@ -14,7 +14,7 @@ import type {} from '@deepseek-ai/dsh-client-ui-conversation/client'
 import type {} from '@deepseek-ai/dsh-client-ui-slots'
 // header actions 槽位由 dsh-client-ui-conversation 声明；type-only 导入加载 SlotMap 增强
 import type {} from '@deepseek-ai/dsh-client-ui-layout/client'
-import { SessionCardRail, type SessionCardRailProps } from './SessionCardRail.tsx'
+import { SessionCardRailCompact, type SessionCardRailCompactProps } from './SessionCardRailCompact.tsx'
 import { AutoNameButton, type AutoNameButtonProps } from './AutoNameButton.tsx'
 import { installDeepLink } from './deep-link.ts'
 
@@ -96,7 +96,7 @@ export function apply(ctx: ClientContext): void {
           }
         },
       }),
-    }, SessionCardRail as unknown as (props: SessionCardRailProps) => JSX.Element))
+    }, SessionCardRailCompact as unknown as (props: SessionCardRailCompactProps) => JSX.Element))
   }, 'dsh-dingo: session card rail slot')
 
   // 2.0 自动命名按钮：放在标准操作之后、卡片 Rail 左侧。
