@@ -379,11 +379,12 @@ export function SessionCardRailCompact({ rpc, openSession: openTarget, useSessio
   const waiting = panelItems.filter((card) => hasBackgroundWork(card.sessionId) && (card.status === 'answered' || card.status === 'normal'))
   const intermediate = panelItems.filter((card) => card.status === 'running' && card.hasIntermediate)
   const needsTotal = errors.length + questions.length + answers.length
-  // 草稿是当前对话的正常输入状态，不参与顶部闪烁提醒。
-  const priority = errors.length > 0 ? 'error' : questions.length > 0 ? 'question' : answers.length > 0 ? 'answered' : undefined
-  const priorityCount = needsTotal
+  // 仅“非当前对话”的草稿才参与顶部提醒；当前对话正在输入是正常状态。
+  const otherDraftCount = allSessionIds.filter((id) => String(id) !== currentSessionId && hasDraftFor(String(id))).length
+  const priority = errors.length > 0 ? 'error' : questions.length > 0 ? 'question' : otherDraftCount > 0 ? 'draft' : answers.length > 0 ? 'answered' : undefined
+  const priorityCount = priority === 'draft' ? otherDraftCount : needsTotal
 
-  const priorityColor = priority === 'error' ? '#ef4444' : priority === 'question' ? '#f59e0b' : priority === 'answered' ? '#22c55e' : undefined
+  const priorityColor = priority === 'error' ? '#ef4444' : priority === 'question' ? '#f59e0b' : priority === 'draft' ? '#a855f7' : priority === 'answered' ? '#22c55e' : undefined
   const pulse = priority ? 'lv-fb-pulse 1s ease-in-out infinite' : undefined
 
   const summaryStyle: React.CSSProperties = {
