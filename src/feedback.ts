@@ -149,6 +149,8 @@ export interface SessionCardView {
   readonly hasIntermediate?: boolean;
   /** 该会话是否有 TaskSwarm 蜂群批次仍在运行（主对话可能已完成）。 */
   readonly hasSwarm?: boolean;
+  /** 该会话 TaskSwarm 蜂群中未完成的 lane 数量。 */
+  readonly swarmLaneCount?: number;
 }
 
 /** 反馈引擎快照（`/dingo.feedback {action:'announcements'}` 与 `/dingo status` 共用）。 */
@@ -233,7 +235,7 @@ export interface FeedbackDeps {
   /** 测试辅助：speak 后自动完成（跳过显式 completeSpeech）。 */
   readonly autoCompleteSpeech?: boolean;
   /** TaskSwarm 活跃批次读取器（可选；用于标记蜂群等待状态）。 */
-  readonly resolveTaskswarm?: () => ReadonlyArray<{ ownerSessionId?: string; phase: string }>;
+  readonly resolveTaskswarm?: () => ReadonlyArray<{ ownerSessionId?: string; phase: string; lanes?: ReadonlyArray<{ phase: string }> }>;
 }
 
 /** barge-in 打断后重播冷却（ms）。 */
@@ -381,10 +383,14 @@ export class FeedbackEngine {
   cardViews(): readonly SessionCardView[] {
     const now = this.now();
     const swarmOwners = new Set<string>();
+    const swarmLaneCount = new Map<string, number>();
     for (const batch of this.deps.resolveTaskswarm?.() ?? []) {
-      if (batch.ownerSessionId && batch.phase !== 'aborted' && batch.phase !== 'complete') {
-        swarmOwners.add(batch.ownerSessionId);
-      }
+      if (!batch.ownerSessionId || batch.phase === 'aborted' || batch.phase === 'complete') continue;
+      swarmOwners.add(batch.ownerSessionId);
+      const active = (batch.lanes ?? []).filter(
+        (lane) => lane.phase === 'pending' || lane.phase === 'running' || lane.phase === 'review' || lane.phase === 'conflict',
+      ).length;
+      swarmLaneCount.set(batch.ownerSessionId, (swarmLaneCount.get(batch.ownerSessionId) ?? 0) + active);
     }
     const views = [...this.cards.values()]
       .filter((card) => card.status !== 'normal' || now - (card.conclusionAt ?? card.updatedAt) < CARD_HIDE_AFTER_SEEN_MS || swarmOwners.has(card.sessionId))
@@ -398,6 +404,7 @@ export class FeedbackEngine {
         conclusionAt: card.conclusionAt,
         hasIntermediate: card.hasIntermediate,
         hasSwarm: swarmOwners.has(card.sessionId),
+        swarmLaneCount: swarmLaneCount.get(card.sessionId) ?? 0,
       }));
     views.sort((a, b) => {
       const group = (status: SessionCardStatus): number => {
@@ -1090,7 +1097,7 @@ export interface FeedbackInstallOptions {
   /** 新提醒项入队后回调（host 发系统级通知）。 */
   readonly onEnqueue?: (item: AnnouncementView) => void;
   /** TaskSwarm 活跃批次读取器（可选）。 */
-  readonly resolveTaskswarm?: () => ReadonlyArray<{ ownerSessionId?: string; phase: string }>;
+  readonly resolveTaskswarm?: () => ReadonlyArray<{ ownerSessionId?: string; phase: string; lanes?: ReadonlyArray<{ phase: string }> }>;
 }
 
 export function installFeedback(

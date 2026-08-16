@@ -102,7 +102,7 @@ export function apply(ctx: Context, config: unknown): void {
     audio,
     logger: (message) => logger.info(message),
     resolveTaskswarm: () => {
-      const svc = ctx.get('taskswarm') as { getSnapshot(): { batches: Array<{ ownerSessionId?: string; phase: string }> } } | undefined
+      const svc = ctx.get('taskswarm') as { getSnapshot(): { batches: Array<{ ownerSessionId?: string; phase: string; lanes?: Array<{ phase: string }> }> } } | undefined
       return svc?.getSnapshot().batches ?? []
     },
     onEnqueue: (item: AnnouncementView) => {

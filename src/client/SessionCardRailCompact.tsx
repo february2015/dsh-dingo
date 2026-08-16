@@ -48,6 +48,8 @@ export interface SessionCardView {
   hasIntermediate?: boolean
   /** 该会话是否有 TaskSwarm 蜂群批次仍在运行。 */
   hasSwarm?: boolean
+  /** 该会话 TaskSwarm 蜂群中未完成的 lane 数量。 */
+  swarmLaneCount?: number
 }
 
 /** `/dingo.feedback {action:'announcements'}` 响应快照。 */
@@ -456,7 +458,7 @@ export function SessionCardRailCompact({ rpc, openSession: openTarget, useSessio
               sessionTitles={sessionTitles as Record<string, { displayTitle?: string }> | undefined}
               isDraft={hasDraftFor(card.sessionId)}
               isWaiting={isWaiting(card.sessionId)}
-              backgroundCount={backgroundJobCount(card.sessionId)}
+              backgroundCount={backgroundJobCount(card.sessionId) + (card.swarmLaneCount ?? 0)}
               onOpen={handleOpenSession}
               onDismiss={handleDismiss}
             />
