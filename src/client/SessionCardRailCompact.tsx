@@ -191,6 +191,12 @@ export function SessionCardRailCompact({ rpc, openSession: openTarget, useSessio
     return Object.values(summaries).some((summary) => summary.parentId === sessionId && summary.running === true)
   }
 
+  /** 某会话未完成后台任务数量（running/stopping）。 */
+  const backgroundJobCount = (sessionId: string): number => {
+    const jobs = (jobsBySession as Record<string, readonly { status: string }[]>)[sessionId] ?? []
+    return jobs.filter((job) => job.status === 'running' || job.status === 'stopping').length
+  }
+
   /** 读取某会话的草稿（当前会话走 useInput，其它会话走轮询 map）。 */
   const draftOf = (sessionId: string): string => drafts[sessionId] ?? (sessionId === currentSessionId ? draft : '')
   const hasDraftFor = (sessionId: string): boolean => draftOf(sessionId).trim().length > 0
@@ -450,6 +456,7 @@ export function SessionCardRailCompact({ rpc, openSession: openTarget, useSessio
               sessionTitles={sessionTitles as Record<string, { displayTitle?: string }> | undefined}
               isDraft={hasDraftFor(card.sessionId)}
               isWaiting={isWaiting(card.sessionId)}
+              backgroundCount={backgroundJobCount(card.sessionId)}
               onOpen={handleOpenSession}
               onDismiss={handleDismiss}
             />
@@ -466,6 +473,7 @@ function DetailedCard({
   sessionTitles,
   isDraft,
   isWaiting,
+  backgroundCount,
   onOpen,
   onDismiss,
 }: {
@@ -473,6 +481,7 @@ function DetailedCard({
   sessionTitles?: Record<string, { displayTitle?: string; cwd?: string }>
   isDraft?: boolean
   isWaiting?: boolean
+  backgroundCount?: number
   onOpen: (card: SessionCardView) => void
   onDismiss: (sessionId: string) => void
 }): JSX.Element {
@@ -495,7 +504,15 @@ function DetailedCard({
     >
       <SessionStatusIcon status={card.status} />
       <span style={styles.body}>
-        <span style={styles.workspace}>{truncate(workspaceTitle ?? '', 16) || '（无工作区）'}</span>
+        <span style={styles.workspace}>
+          {truncate(workspaceTitle ?? '', 16) || '（无工作区）'}
+          {backgroundCount ? (
+            <>
+              <span style={styles.miniSpinner} />
+              {backgroundCount}
+            </>
+          ) : null}
+        </span>
         <span style={styles.session}>
           {truncate(title, 20) || '（未命名对话）'}
           {isDraft ? ' ✎' : ''}
@@ -683,11 +700,25 @@ const styles: Record<string, React.CSSProperties> = {
     gap: 2,
   },
   workspace: {
+    display: 'inline-flex',
+    alignItems: 'center',
+    gap: 4,
     fontSize: 11,
     color: '#9aa3b2',
     whiteSpace: 'nowrap',
     overflow: 'hidden',
     textOverflow: 'ellipsis',
+  },
+  miniSpinner: {
+    display: 'inline-block',
+    width: 8,
+    height: 8,
+    borderRadius: '50%',
+    border: '1.5px solid rgba(120,140,180,0.4)',
+    borderTopColor: '#60a5fa',
+    animation: 'lv-fb-spin 0.8s linear infinite',
+    boxSizing: 'border-box',
+    flex: 'none',
   },
   session: {
     fontSize: 13,
