@@ -49,7 +49,7 @@ export async function autoNameSession(ctx: Context, sessionId: string): Promise<
   }
 
   const rpcId = makeRpcId()
-  const history = await api.sessions.history({ rpcId, payload: { sessionId, maxMessages: 20 } })
+  const history = await api.sessions.history({ rpcId, payload: { sessionId, maxMessages: 50 } })
   if (!history.result.ok || !history.result.value) {
     return { ok: false, error: history.result.error?.message ?? '读取会话历史失败' }
   }
@@ -76,9 +76,13 @@ function extractRecentUserTexts(events: readonly HistoryEntryLike[]): string[] {
     if (!event) continue
     if (event.type !== 'user/message') continue
     const data = event.data as { content?: unknown; message?: { content?: unknown } } | undefined
-    // dsh-session 的 user/message 事件 data 就是 UserMessage 本身（content 在 data.content），
-    // 兼容旧形状 data.message.content。
-    const content = data && 'content' in data ? data.content : data?.message?.content
+    // 兼容多种历史形状：
+    // - dsh-session 新版：data.content 就是 UserMessage.content
+    // - 旧形状：data.message.content / event.message.content
+    // - 极端情况：data 本身就是字符串
+    const content = (data && 'content' in data)
+      ? data.content
+      : data?.message?.content ?? (event as { message?: { content?: unknown } }).message?.content ?? (typeof data === 'string' ? data : undefined)
     const text = extractText(content)
     if (text) texts.push(text)
   }
@@ -93,7 +97,10 @@ function extractText(content: any): string {
     return content
       .map((part) => {
         if (typeof part === 'string') return part
-        if (part && typeof part === 'object' && typeof part.text === 'string') return part.text
+        if (part && typeof part === 'object') {
+          if (typeof part.text === 'string') return part.text
+          if (typeof part.content === 'string') return part.content
+        }
         return ''
       })
       .filter(Boolean)
@@ -140,7 +147,11 @@ async function generateTitleWithLlm(ctx: Context, texts: string[]): Promise<stri
       }
     }
     const clean = title.replace(/^["'“”]+|["'“”]+$/g, '').trim()
-    return clean || undefined
+    // 拒绝模型“反问/索要消息/无法生成”等非标题输出，交给规则回退。
+    if (!clean || clean.length > 60 || /请提供|请给我|请发送|需要你提供|无法生成|请先提供|请补充/.test(clean)) {
+      return undefined
+    }
+    return clean
   } catch {
     return undefined
   }
