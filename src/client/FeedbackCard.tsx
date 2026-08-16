@@ -58,9 +58,6 @@ export interface FeedbackSnapshotView {
 /** 轮询间隔（ms）：插播出现到 toast 上屏的感知延迟。 */
 const POLL_INTERVAL_MS = 1000
 
-/** 卡片保留时长（ms）：播报完成后仍显示这么久，供点击跳转/关闭；之后自动消失。 */
-const CARD_KEEP_MS = 30_000
-
 /**
  * 定位"Session log 下载按钮"（对话区域右上角）：扫描按钮，匹配
  * aria-label/title/文本含 "session" + "log"。返回其左上角坐标与尺寸
@@ -165,10 +162,10 @@ export function FeedbackCard({ rpc, openSession: openTarget, useSessions }: Feed
   // 见过 speaking 的项（speaking → 消失 的过渡只报一次 spoken）
   const seenSpeaking = useRef(new Set<string>())
   const reportedSpoken = useRef(new Set<string>())
-  // 本地卡片缓存：id → { item, seenAt }。播报完成/快照消失后仍保留显示
-  // CARD_KEEP_MS 秒（卡片是"待处理提醒"，不该跟语音播报一起消失），
-  // 直到用户点击跳转 / × 关闭 / 超时自动清理。
-  const [cards, setCards] = useState<Map<string, { item: AnnouncementView; seenAt: number }>>(new Map())
+  // 本地卡片缓存：id → AnnouncementView。卡片不自动消失——保留显示直到
+  // 用户点击跳转（同会话卡片一起清除）或手动 × 关闭（卡片是"待处理提醒"，
+  // 不该跟语音播报一起消失，也不该超时偷偷消失）。
+  const [cards, setCards] = useState<Map<string, AnnouncementView>>(new Map())
   // Session log 按钮锚点（对话区域右上角；找不到 = undefined → 回退视口右上角）。
   const [anchor, setAnchor] = useState<{ left: number; top: number; width: number; height: number } | undefined>(undefined)
 
@@ -195,7 +192,7 @@ export function FeedbackCard({ rpc, openSession: openTarget, useSessions }: Feed
     setCards((prev) => {
       const next = new Map(prev)
       for (const [id, entry] of next) {
-        if (entry.item.sessionId === target) {
+        if (entry.sessionId === target) {
           next.delete(id)
           void rpc.call('/dingo', 'feedback', { action: 'dismiss', id })
         }
@@ -218,19 +215,11 @@ export function FeedbackCard({ rpc, openSession: openTarget, useSessions }: Feed
           setSnapshot(next)
           // 刷新 Session log 按钮锚点（布局/切换对话后位置会变）
           setAnchor(findSessionLogAnchor())
-          // 快照队列项 → 本地卡片缓存（首次见到记录 seenAt；已存在则刷新数据不重置计时）
-          const nowMs = Date.now()
+          // 快照队列项 → 本地卡片缓存（覆盖数据；已存在项保持，不因快照刷新丢失）
           setCards((prev) => {
             const out = new Map(prev)
             for (const item of next.queue) {
-              const existing = out.get(item.id)
-              out.set(item.id, existing === undefined
-                ? { item, seenAt: nowMs }
-                : { item, seenAt: existing.seenAt })
-            }
-            // 超时清理：播完/消失后保留 CARD_KEEP_MS 秒，之后自动移除
-            for (const [id, entry] of out) {
-              if (nowMs - entry.seenAt > CARD_KEEP_MS) out.delete(id)
+              out.set(item.id, item)
             }
             return out
           })
@@ -282,9 +271,9 @@ export function FeedbackCard({ rpc, openSession: openTarget, useSessions }: Feed
   }, [currentSessionId, rpc])
 
   if (snapshot === undefined || !snapshot.enabled) return null
-  // 渲染本地卡片缓存（播完/快照消失后仍保留 CARD_KEEP_MS 秒，供点击/关闭）。
+  // 渲染本地卡片缓存（不自动消失，供点击直达 / 手动关闭）。
   // 当前对话（own）项只播提示音，不显示卡片（用户正在看该对话）。
-  const items = [...cards.values()].map((entry) => entry.item).filter((item) => item.own !== true)
+  const items = [...cards.values()].filter((item) => item.own !== true)
   if (items.length === 0) return null
 
   return (

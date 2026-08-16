@@ -33,7 +33,7 @@ Current conversation replies → **dang / dang-dang** (crisp tone set); other co
   - 🟩 green square = reply, 🟠 question mark = needs answer, 🔴 exclamation = failed;
 - **Click the card → jump to that conversation**; **×** in the corner closes it;
 - Cards stack from the top right (below the Session log button), 8px apart; clicking a card clears **all** cards of that conversation and the rest reflow up;
-- Cards stay for 30s after the alert so you can click/close them, then auto-dismiss.
+- Cards stay until you click to jump (clears all cards of that conversation) or close them with **×** — no auto-dismiss.
 
 **Reminder discipline**:
 - The **same reminder** in the same conversation won't repeat within 10s (content-based dedup: different reminders still ring; each conversation tracks its own window);
