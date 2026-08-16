@@ -36,7 +36,25 @@ export function apply(ctx: ClientContext): void {
   const rpc = connection.rpc
   // 会话跳转服务：卡片点击 → 直接打开对应对话（与侧边栏点击同一入口）。
   // 注意：open 要求会话在列表内；未知/已删除会话会抛错，这里静默忽略。
-  const sessions = ctx.get('sessions') as { open(id: string): void } | undefined
+  const sessions = ctx.get('sessions') as {
+    open(id: string): void
+    binding(id: string): { ctx: unknown } | undefined
+  } | undefined
+  // 会话输入服务：用于读取任意会话的未发送草稿。
+  const conversation = ctx.get('conversation') as {
+    input: {
+      for(actx: unknown): { state: { getSnapshot(): { draft: string } } }
+    }
+  } | undefined
+  const getDraftBySession = (sessionId: string): string => {
+    try {
+      const binding = sessions?.binding(sessionId)
+      if (!binding) return ''
+      return conversation?.input.for(binding.ctx).state.getSnapshot()?.draft ?? ''
+    } catch {
+      return ''
+    }
+  }
 
   // 系统通知深链：dingOpen 参数 + 标签页复用（已有 DSH 标签页接管跳转并聚焦）
   if (sessions !== undefined) {
@@ -88,6 +106,7 @@ export function apply(ctx: ClientContext): void {
       order: 100,
       inject: () => ({
         rpc,
+        getDraftBySession,
         openSession: (sessionId: string) => {
           try {
             sessions?.open(sessionId)

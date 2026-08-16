@@ -44,6 +44,8 @@ export interface SessionCardView {
   createdAt: number
   updatedAt: number
   conclusionAt?: number
+  /** 执行中是否已经产生中间输出（有内容但未最终完成）。 */
+  hasIntermediate?: boolean
 }
 
 /** `/dingo.feedback {action:'announcements'}` 响应快照。 */
@@ -133,39 +135,64 @@ export interface SessionCardRailCompactProps {
    * 框架标准钩子：读取当前会话输入框状态，用于识别“已输入但未发送”的草稿态。
    */
   useInput?: <T>(selector: (s: { draft?: string }) => T) => T | undefined
+  /** 读取任意会话的未发送草稿（由 client 入口注入）。 */
+  getDraftBySession?: (sessionId: string) => string
 }
 
-/** 草稿态排序：异常 > 疑问 > 草稿 > 待阅读 > 执行中 > 正常。 */
-function cardRank(card: SessionCardView, currentSessionId?: string, hasDraft?: boolean): number {
-  const isDraft = hasDraft && card.sessionId === currentSessionId
+/** 排序：异常 > 疑问 > 草稿 > 等待后台/子任务 > 待阅读 > 中间输出 > 执行中 > 正常。 */
+function cardRank(
+  card: SessionCardView,
+  isDraftFor?: (sessionId: string) => boolean,
+  isWaiting?: (sessionId: string) => boolean,
+): number {
+  const isDraft = isDraftFor?.(card.sessionId) ?? false
+  const waiting = isWaiting?.(card.sessionId) ?? false
   switch (card.status) {
     case 'error':
       return 0
     case 'question':
       return 1
     case 'answered':
-      return isDraft ? 2 : 3
+      return isDraft ? 2 : waiting ? 3 : 4
     case 'running':
-      return isDraft ? 2 : 4
+      return isDraft ? 2 : card.hasIntermediate ? 5 : 6
     case 'normal':
-      return isDraft ? 2 : 5
+      return isDraft ? 2 : waiting ? 3 : 7
     default:
-      return 6
+      return 8
   }
 }
 
 /**
  * 紧凑统计 Rail：内嵌只显示一个统计胶囊，悬停/点击弹出详细卡片面板。
  */
-export function SessionCardRailCompact({ rpc, openSession: openTarget, useSessions, useInput }: SessionCardRailCompactProps): JSX.Element | null {
+export function SessionCardRailCompact({ rpc, openSession: openTarget, useSessions, useInput, getDraftBySession }: SessionCardRailCompactProps): JSX.Element | null {
   const [snapshot, setSnapshot] = useState<FeedbackSnapshotView | undefined>(undefined)
   /** 当前打开的对话（框架注入；上报 host 用于"当前对话当/当当"判定）。 */
   const currentSessionId = useSessions?.((s) => s.current)
   /** 各会话 displayTitle（与侧边栏同一数据源；host 标题缺失时卡片兜底显示）。 */
   const sessionTitles = useSessions?.((s) => s.byId)
+  const allSessionIds = useSessions?.((s) => s.ids) ?? []
+  /** 各会话后台任务（用于识别“等待后台/子任务”状态）。 */
+  const jobsBySession = useSessions?.((s) => s.jobsBySession) ?? {}
   /** 当前会话输入框草稿（未发送内容）；用于识别“草稿态”。 */
   const draft = useInput?.((s) => s.draft) ?? ''
   const hasDraft = typeof draft === 'string' && draft.trim().length > 0
+  /** 跨会话草稿轮询结果：sessionId → draft。 */
+  const [drafts, setDrafts] = useState<Record<string, string>>({})
+
+  /** 判断某会话是否有后台任务/子任务仍在跑（主对话可能已完成）。 */
+  const hasBackgroundWork = (sessionId: string): boolean => {
+    const jobs = (jobsBySession as Record<string, readonly { status: string }[]>)[sessionId] ?? []
+    if (jobs.some((job) => job.status === 'running' || job.status === 'stopping')) return true
+    const summaries = (sessionTitles ?? {}) as Record<string, { parentId?: string; running?: boolean }>
+    return Object.values(summaries).some((summary) => summary.parentId === sessionId && summary.running === true)
+  }
+
+  /** 读取某会话的草稿（当前会话走 useInput，其它会话走轮询 map）。 */
+  const draftOf = (sessionId: string): string => drafts[sessionId] ?? (sessionId === currentSessionId ? draft : '')
+  const hasDraftFor = (sessionId: string): boolean => draftOf(sessionId).trim().length > 0
+
   // 已播放过提示音的 speaking 项（每 id 一次）
   const tonePlayed = useRef(new Set<string>())
   // 见过 speaking 的项（speaking → 消失 的过渡只报一次 spoken）
@@ -266,6 +293,32 @@ export function SessionCardRailCompact({ rpc, openSession: openTarget, useSessio
     }
   }, [rpc])
 
+  // 轮询所有会话的草稿状态（用于跨会话提醒）。
+  useEffect(() => {
+    if (!getDraftBySession) return
+    let stopped = false
+    const sync = (): void => {
+      if (stopped) return
+      const next: Record<string, string> = {}
+      for (const id of allSessionIds) {
+        const value = getDraftBySession(String(id))
+        if (value.trim()) next[String(id)] = value
+      }
+      setDrafts((prev) => {
+        const changed = Object.keys(next).length !== Object.keys(prev).length
+          || Object.entries(next).some(([k, v]) => prev[k] !== v)
+        return changed ? next : prev
+      })
+    }
+    sync()
+    const timer = setInterval(sync, 1000)
+    return () => {
+      stopped = true
+      clearInterval(timer)
+    }
+  }, [getDraftBySession, allSessionIds])
+
+
   // 上报"当前查看的对话"：host 判定当前对话回复 → 当/当当（crisp 档），
   // 其他对话 → 另一声音（soft 档"叮"）+ 卡片；同时把当前结论态标记为「正常」。
   useEffect(() => {
@@ -294,25 +347,28 @@ export function SessionCardRailCompact({ rpc, openSession: openTarget, useSessio
   // 当前对话正在输入是正常状态，不需要因为草稿单独从顶部提示；没有其他卡片时就不显示统计。
   if (items.length === 0) return null
 
-  // 如果当前会话有草稿但已被移出卡片清单，补一张客户端草稿卡用于展示。
-  const summary = currentSessionId
-    ? (sessionTitles as Record<string, { displayTitle?: string; cwd?: string }> | undefined)?.[currentSessionId]
-    : undefined
-  const draftCard: SessionCardView | undefined = hasDraft && currentSessionId && !items.some((card) => card.sessionId === currentSessionId)
-    ? {
-        sessionId: currentSessionId,
-        status: 'normal',
-        workspaceTitle: summary?.cwd ? basename(summary.cwd) : undefined,
-        sessionTitle: summary?.displayTitle,
-        createdAt: Date.now(),
-        updatedAt: Date.now(),
-      }
-    : undefined
-  const panelItems = draftCard ? [...items, draftCard] : items
+  // 补卡：有草稿或后台任务/子任务，但已被移出 host 卡片清单的会话，在面板中仍展示。
+  const summaries = (sessionTitles ?? {}) as Record<string, { displayTitle?: string; cwd?: string }>
+  const syntheticCards: SessionCardView[] = []
+  for (const id of allSessionIds) {
+    const sid = String(id)
+    if (items.some((card) => card.sessionId === sid)) continue
+    if (!hasDraftFor(sid) && !hasBackgroundWork(sid)) continue
+    const info = summaries[sid]
+    syntheticCards.push({
+      sessionId: sid,
+      status: 'normal',
+      workspaceTitle: info?.cwd ? basename(info.cwd) : undefined,
+      sessionTitle: info?.displayTitle,
+      createdAt: Date.now(),
+      updatedAt: Date.now(),
+    })
+  }
+  const panelItems = syntheticCards.length > 0 ? [...items, ...syntheticCards] : items
 
-  // 草稿态是 client 侧状态，排序时手动插到“执行中”之前。
+  // 排序：草稿/后台等待/中间输出等 client 侧状态一起参与。
   const sortedItems = [...panelItems].sort(
-    (a, b) => cardRank(a, currentSessionId, hasDraft) - cardRank(b, currentSessionId, hasDraft),
+    (a, b) => cardRank(a, hasDraftFor, hasBackgroundWork) - cardRank(b, hasDraftFor, hasBackgroundWork),
   )
 
   const errors = items.filter((card) => card.status === 'error')
@@ -320,6 +376,8 @@ export function SessionCardRailCompact({ rpc, openSession: openTarget, useSessio
   const answers = items.filter((card) => card.status === 'answered')
   const running = items.filter((card) => card.status === 'running')
   const normal = items.filter((card) => card.status === 'normal')
+  const waiting = panelItems.filter((card) => hasBackgroundWork(card.sessionId) && (card.status === 'answered' || card.status === 'normal'))
+  const intermediate = panelItems.filter((card) => card.status === 'running' && card.hasIntermediate)
   const needsTotal = errors.length + questions.length + answers.length
   // 草稿是当前对话的正常输入状态，不参与顶部闪烁提醒。
   const priority = errors.length > 0 ? 'error' : questions.length > 0 ? 'question' : answers.length > 0 ? 'answered' : undefined
@@ -367,6 +425,10 @@ export function SessionCardRailCompact({ rpc, openSession: openTarget, useSessio
         {priorityCount > 0 && <span style={styles.count}>{priorityCount}</span>}
         {running.length > 0 && <span style={styles.spinner} />}
         {running.length > 0 && <span style={styles.count}>{running.length}</span>}
+        {intermediate.length > 0 && <span style={{ ...styles.dot, ...styles.dotIntermediate }} />}
+        {intermediate.length > 0 && <span style={styles.count}>{intermediate.length}</span>}
+        {waiting.length > 0 && <span style={{ ...styles.dot, ...styles.dotWaiting }} />}
+        {waiting.length > 0 && <span style={styles.count}>{waiting.length}</span>}
         {normal.length > 0 && <span style={{ ...styles.dot, ...styles.dotNormal }} />}
         {normal.length > 0 && <span style={styles.count}>{normal.length}</span>}
       </button>
@@ -377,7 +439,8 @@ export function SessionCardRailCompact({ rpc, openSession: openTarget, useSessio
               key={card.sessionId}
               card={card}
               sessionTitles={sessionTitles as Record<string, { displayTitle?: string }> | undefined}
-              isDraft={card.sessionId === currentSessionId && hasDraft}
+              isDraft={hasDraftFor(card.sessionId)}
+              isWaiting={hasBackgroundWork(card.sessionId)}
               onOpen={handleOpenSession}
               onDismiss={handleDismiss}
             />
@@ -393,16 +456,19 @@ function DetailedCard({
   card,
   sessionTitles,
   isDraft,
+  isWaiting,
   onOpen,
   onDismiss,
 }: {
   card: SessionCardView
   sessionTitles?: Record<string, { displayTitle?: string }>
   isDraft?: boolean
+  isWaiting?: boolean
   onOpen: (card: SessionCardView) => void
   onDismiss: (sessionId: string) => void
 }): JSX.Element {
   const title = card.sessionTitle ?? sessionTitles?.[card.sessionId]?.displayTitle ?? ''
+  const intermediate = card.status === 'running' && card.hasIntermediate
   return (
     <div
       className={`lv-fb__full lv-fb--${card.status}`}
@@ -410,6 +476,8 @@ function DetailedCard({
         ...styles.full,
         ...statusCardStyle(card.status),
         ...(isDraft ? { borderColor: 'rgba(168,85,247,0.7)', background: 'rgba(60,30,70,0.92)' } : {}),
+        ...(isWaiting ? { borderColor: 'rgba(20,184,166,0.7)', background: 'rgba(15,55,50,0.92)' } : {}),
+        ...(intermediate ? { borderColor: 'rgba(34,211,238,0.6)', background: 'rgba(15,45,60,0.92)' } : {}),
       }}
       data-status={card.status}
       onClick={() => onOpen(card)}
@@ -420,6 +488,8 @@ function DetailedCard({
         <span style={styles.session}>
           {truncate(title, 20) || '（未命名对话）'}
           {isDraft ? ' ✎' : ''}
+          {isWaiting ? ' ⏳' : ''}
+          {intermediate ? ' ↻' : ''}
         </span>
       </span>
       <button
@@ -487,6 +557,12 @@ const styles: Record<string, React.CSSProperties> = {
   },
   dotNormal: {
     background: '#9ca3af',
+  },
+  dotWaiting: {
+    background: '#14b8a6',
+  },
+  dotIntermediate: {
+    background: '#22d3ee',
   },
   spinner: {
     display: 'inline-block',

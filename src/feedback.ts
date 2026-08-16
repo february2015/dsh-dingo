@@ -145,6 +145,8 @@ export interface SessionCardView {
   readonly updatedAt: number;
   /** 进入结论态的时间（结论态排序用；执行态缺省）。 */
   readonly conclusionAt?: number;
+  /** 执行中是否已经产生中间输出（有内容但未最终完成）。 */
+  readonly hasIntermediate?: boolean;
 }
 
 /** 反馈引擎快照（`/dingo.feedback {action:'announcements'}` 与 `/dingo status` 共用）。 */
@@ -284,6 +286,7 @@ interface SessionCardState {
   readonly createdAt: number;
   updatedAt: number;
   conclusionAt?: number;
+  hasIntermediate?: boolean;
 }
 
 /**
@@ -383,6 +386,7 @@ export class FeedbackEngine {
         createdAt: card.createdAt,
         updatedAt: card.updatedAt,
         conclusionAt: card.conclusionAt,
+        hasIntermediate: card.hasIntermediate,
       }));
     views.sort((a, b) => {
       const group = (status: SessionCardStatus): number => {
@@ -435,6 +439,7 @@ export class FeedbackEngine {
       existing.status = effectiveStatus;
       existing.updatedAt = now;
       existing.conclusionAt = status === 'running' ? undefined : now;
+      if (status === 'running') existing.hasIntermediate = false;
       return;
     }
     this.cards.set(sessionId, {
@@ -443,6 +448,7 @@ export class FeedbackEngine {
       createdAt: now,
       updatedAt: now,
       conclusionAt: status === 'running' ? undefined : now,
+      hasIntermediate: false,
     });
   }
 
@@ -496,7 +502,12 @@ export class FeedbackEngine {
         };
         const message = record.data?.message ?? record.message;
         const text = extractMessageText(message?.content);
-        if (text) this.assistantText.set(sessionId, text);
+        if (text) {
+          this.assistantText.set(sessionId, text);
+          // 执行中已产生中间输出：标记 hasIntermediate，供 UI 区分“有内容但未完成”。
+          const card = this.cards.get(sessionId);
+          if (card && card.status === 'running') card.hasIntermediate = true;
+        }
         return;
       }
       case 'turn/end': {
