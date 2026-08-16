@@ -429,15 +429,17 @@ export class FeedbackEngine {
   private setCardStatus(sessionId: string, status: SessionCardStatus): void {
     const now = this.now();
     const existing = this.cards.get(sessionId);
+    // 当前正在查看的对话完成/提问后，用户已经在看，直接视为「正常」（已看过）。
+    const effectiveStatus = status !== 'running' && sessionId === this.activeSessionId ? 'normal' : status;
     if (existing) {
-      existing.status = status;
+      existing.status = effectiveStatus;
       existing.updatedAt = now;
       existing.conclusionAt = status === 'running' ? undefined : now;
       return;
     }
     this.cards.set(sessionId, {
       sessionId,
-      status,
+      status: effectiveStatus,
       createdAt: now,
       updatedAt: now,
       conclusionAt: status === 'running' ? undefined : now,

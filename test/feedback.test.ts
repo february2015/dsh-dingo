@@ -269,3 +269,16 @@ describe('2.0 会话卡片（五态 + 排序 + 隐藏）', () => {
     expect(engine.cardViews()).toHaveLength(0)
   })
 })
+
+describe('2.0 当前对话完成自动视为已看过', () => {
+  it('正在查看的对话执行完成后卡片直接是 normal，而不是 answered', async () => {
+    const { engine } = build()
+    engine.setActiveSession('sess-a')
+    engine.handleSessionEvent({ id: 'sess-a' }, sessionEvent('turn/start', { turn: 1 }))
+    engine.handleSessionEvent({ id: 'sess-a' }, sessionEvent('assistant/message', undefined, { message: { content: '构建通过' } }))
+    engine.handleSessionEvent({ id: 'sess-a' }, sessionEvent('turn/end', { reason: { kind: 'completed' } }))
+    await flush()
+    const card = engine.cardViews().find((c) => c.sessionId === 'sess-a')
+    expect(card?.status).toBe('normal')
+  })
+})
