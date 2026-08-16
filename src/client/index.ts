@@ -56,17 +56,25 @@ export function apply(ctx: ClientContext): void {
 
   // 上报 DSH Web UI 前台可见性：host 据此决定是否发系统通知
   // （可见 → 浏览器内提醒已够；不可见/未开 → 系统通知）。
+  // 注意：页面刚加载时 document.hasFocus() 可能为 false（初始上报误报不可见），
+  // 之后窗口已聚焦但 focus 事件不重发 → host 一直以为不可见 → 当前对话也弹系统通知。
+  // 修复：值变化才上报 + 3s 定时兜底，保证状态最终一致。
   ctx.effect(() => {
     if (typeof document === 'undefined') return () => {}
+    let last: boolean | undefined
     const report = (): void => {
       const visible = document.visibilityState === 'visible' && document.hasFocus()
+      if (visible === last) return
+      last = visible
       void rpc.call('/dingo', 'set-visibility', { visible }).catch(() => {})
     }
     report()
     document.addEventListener('visibilitychange', report)
     window.addEventListener('focus', report)
     window.addEventListener('blur', report)
+    const timer = setInterval(report, 3000)
     return () => {
+      clearInterval(timer)
       document.removeEventListener('visibilitychange', report)
       window.removeEventListener('focus', report)
       window.removeEventListener('blur', report)
