@@ -177,17 +177,16 @@ function summaryBucket(
   isDraftFor?: (sessionId: string) => boolean,
   isWaiting?: (sessionId: string) => boolean,
 ): 'error' | 'question' | 'draft' | 'answered' | 'waiting' | 'intermediate' | 'running' | 'normal' | undefined {
+  // 当前对话也计入统计，但统一归入中性「正常」桶，不参与红/橙/紫等提醒闪烁。
+  if (card.sessionId === currentSessionId) return 'normal'
   if (card.status === 'error') return 'error'
   if (card.status === 'question') return 'question'
-  const isDraft = card.sessionId !== currentSessionId && (isDraftFor?.(card.sessionId) ?? false)
+  const isDraft = isDraftFor?.(card.sessionId) ?? false
   if (isDraft) return 'draft'
   if (card.status === 'answered') return 'answered'
-  const waiting = card.sessionId !== currentSessionId && (isWaiting?.(card.sessionId) ?? false)
+  const waiting = isWaiting?.(card.sessionId) ?? false
   if (waiting && card.status === 'normal') return 'waiting'
-  if (card.status === 'running') {
-    if (card.sessionId === currentSessionId) return undefined
-    return card.hasIntermediate ? 'intermediate' : 'running'
-  }
+  if (card.status === 'running') return card.hasIntermediate ? 'intermediate' : 'running'
   if (card.status === 'normal') return 'normal'
   return undefined
 }
