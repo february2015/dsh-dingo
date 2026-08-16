@@ -8,7 +8,7 @@ Hear it, reach it: when another conversation replies, a tone alerts you and a sm
 
 **Great when you run many conversations in parallel**: open several chats (including subagents) side by side and stop watching them one by one — when any of them replies, you hear a distinct tone and the card shows the workspace/conversation name; click it and you're there. Never miss a reply while you work on something else, and switch between tasks with ease.
 
-Current conversation replies → **dang / dang-dang** (crisp tone set); other conversations → **another sound (ding, soft tone set)** + a top-right **card**; click the card to **jump straight to** that conversation. Pure event-driven and lightweight.
+Current conversation replies → **dang / dang-dang** (crisp tone set); other conversations → **another sound (ding, soft tone set)** + a top-right **card**; click the card to **jump straight to** that conversation. Reminders fire only on a turn's **final reply** (or a question awaiting you) — in-between progress messages stay quiet. Pure event-driven and lightweight.
 
 ---
 

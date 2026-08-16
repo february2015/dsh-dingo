@@ -358,9 +358,11 @@ export class FeedbackEngine {
       case 'turn/end': {
         const reason = (event as SessionEventLike & { data?: { reason?: { kind?: string } } }).data?.reason;
         if (reason?.kind !== 'completed') return; // aborted/error/max-tokens 不算完成
-        if (this.isOwnSession(sessionId)) return; // 当前对话自身事件由"当前对话提醒"处理（当/当当）
+        // 当前对话的 turn/end 同样提醒（own 项：只播当/当当提示音、不显示卡片）。
+        // 过程中间回复（assistant/message）不提醒——只有 turn/end（最终回复）
+        // 或提问（approval/ask_user/questions）才算"需要你注意"。
         const text = this.assistantText.get(sessionId) ?? '';
-        // 其他对话回复：含疑问/请求确认 → "需回答"（叮叮 2 声），否则 "有回复"（叮 1 声）
+        // 含疑问/请求确认 → "需回答"（当当 2 声），否则 "有回复"（当 1 声）
         if (isQuestionText(text)) {
           void this.announceNeedConfirm(sessionId, text || '有新内容需要你回答', 'session/turn-end');
         } else {

@@ -1,24 +1,24 @@
 /**
  * dsh-dingo — DSH 声音提醒 + 对话直达插件（host half）。
  *
- * 当前对话回复：当（有回复）/ 当当（需回答）提示音（crisp 档）；
- * 其他对话回复：另一套声音（soft 档"叮"）同样 1 声/2 声区分 + 右上角小卡片
+ * 当前对话最终回复：当（有回复）/ 当当（需回答）提示音（crisp 档）；
+ * 其他对话最终回复：另一套声音（soft 档"叮"）同样 1 声/2 声区分 + 右上角小卡片
  * （工作区 + 对话标题 + 状态图标），点击卡片直达对应对话。
+ * 提醒只在 turn/end（最终回复）或提问（approval/ask_user/questions）时触发，
+ * 过程中的中间回复（assistant/message）不打扰。
  *
  * 全部逻辑 = 会话事件 → 判定级别（isQuestionText）→
- * feedback 队列 → client 播放提示音 + 渲染卡片。
+ * feedback 队列 → client 播放提示音 + 渲染卡片（+ 系统级通知）。
  *
  * @module dsh-dingo
  */
 import type { Context } from '@deepseek-ai/cordis';
 import type {} from '@deepseek-ai/dsh-commands';
 import type {} from '@deepseek-ai/dsh-client-connection';
-import type { Session, SessionEvent } from '@deepseek-ai/dsh-session';
 import z from '@deepseek-ai/schemastery';
 import { installFeedback, type FeedbackAudio, type FeedbackEngine, type FeedbackInstallOptions, type AnnouncementView } from './feedback.ts';
 import { installDingoRpc } from './rpc.ts';
 import { registerDingoCommand } from './command.ts';
-import { isQuestionText } from './question.ts';
 import { sendSystemNotification } from './sysnotify.ts';
 import type { ChannelAuthority } from './types.ts';
 
@@ -121,28 +121,12 @@ export function apply(ctx: Context, config: unknown): void {
   };
   let feedback: FeedbackEngine = installFeedback(ctx, installOptions);
 
-  // ── 当前对话回复 → 立即当/当当（own 提醒，不显示卡片） ──────────────
-  // 客户端上报"当前查看的会话"（/dingo.set-current-session）→ currentSessionId。
-  let currentSessionId: string | undefined;
-  ctx.effect(() => ctx.on('session/event', (session: Session, event: SessionEvent) => {
-    if (event.type !== 'assistant/message') return;
-    const sessionId = String(session.id);
-    if (sessionId !== currentSessionId) return; // 只看当前对话
-    const text = extractMessageText((event as unknown as { data?: { message?: { content?: unknown } } }).data?.message?.content);
-    if (text === '') return;
-    // 回复含疑问/请求确认 → 当当（需回答）；否则 → 当（有回复）
-    feedback.announce(isQuestionText(text) ? 'need-confirm' : 'task-done', {
-      sessionId,
-      summary: text,
-      source: 'current-reply',
-    });
-  }), 'dsh-dingo: current reply notice');
-
   // ── `/dingo` RPC 通道 + 斜杠命令 ──
+  // 当前对话提醒（当/当当）由 feedback 引擎的 turn/end 处理（own 项只播提示音、
+  // 不显示卡片）；这里只把"当前查看的会话"上报给引擎（own 判定用）。
   installDingoRpc(ctx, {
     feedback,
     setCurrentSessionId: (id: string | undefined) => {
-      currentSessionId = id;
       feedback.setActiveSession(id);
     },
     setWebVisible: (visible: boolean) => {
@@ -164,22 +148,4 @@ export function apply(ctx: Context, config: unknown): void {
       dnd: () => feedback.snapshot().dnd,
     },
   });
-}
-
-/** 从 AssistantMessage content 提取纯文本（字符串/多段/数组兜底）。 */
-function extractMessageText(content: unknown): string {
-  if (typeof content === 'string') return content;
-  if (Array.isArray(content)) {
-    return content
-      .map((part) => {
-        if (typeof part === 'string') return part;
-        if (part && typeof part === 'object' && typeof (part as { text?: unknown }).text === 'string') {
-          return (part as { text: string }).text;
-        }
-        return '';
-      })
-      .filter(Boolean)
-      .join(' ');
-  }
-  return '';
 }

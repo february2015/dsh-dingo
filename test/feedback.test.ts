@@ -104,6 +104,22 @@ describe('own 标记（当前对话）', () => {
     const other = engine.pendingViews().find((item) => item.sessionId === 'sess-b')
     expect(other?.own).not.toBe(true)
   })
+
+  it('当前对话 turn/end(completed) → own 项入队（最终回复才提醒）', async () => {
+    const { engine } = build({ autoComplete: false })
+    engine.setActiveSession('sess-a')
+    engine.handleSessionEvent({ id: 'sess-a' }, sessionEvent('assistant/message', undefined, { message: { content: '好的，我开始处理。' } }))
+    engine.handleSessionEvent({ id: 'sess-a' }, sessionEvent('assistant/message', undefined, { message: { content: '正在执行任务…' } }))
+    await flush()
+    // 过程消息（assistant/message）不触发提醒
+    expect(engine.pendingViews()).toHaveLength(0)
+    engine.handleSessionEvent({ id: 'sess-a' }, sessionEvent('turn/end', { reason: { kind: 'completed' } }))
+    await flush()
+    // turn/end（最终回复）→ own 项入队
+    const view = engine.pendingViews().find((item) => item.category === 'task-done')
+    expect(view?.own).toBe(true)
+    expect(view?.sessionId).toBe('sess-a')
+  })
 })
 
 describe('模板（Step 2）', () => {
