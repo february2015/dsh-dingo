@@ -333,16 +333,6 @@ export function SessionCardRailCompact({ rpc, openSession: openTarget, useSessio
     void rpc.call('/dingo', 'set-current-session', { sessionId: currentSessionId }).catch(() => {})
   }, [currentSessionId, rpc])
 
-  // 点击面板外部自动收起。
-  useEffect(() => {
-    if (!panelOpen) return
-    const onDown = (event: MouseEvent): void => {
-      if (railRef.current && !railRef.current.contains(event.target as Node)) closePanel()
-    }
-    document.addEventListener('mousedown', onDown)
-    return () => document.removeEventListener('mousedown', onDown)
-  }, [panelOpen])
-
   // 卸载时清理自动关闭计时器。
   useEffect(() => {
     return () => {
@@ -430,10 +420,7 @@ export function SessionCardRailCompact({ rpc, openSession: openTarget, useSessio
         style={summaryStyle}
         title="查看全部会话卡片"
         aria-label="会话卡片统计"
-        onClick={() => {
-          if (panelOpen) closePanel()
-          else openPanel()
-        }}
+        onClick={openPanel}
       >
         {priorityColor && (
           <span style={{ ...styles.dot, background: priorityColor, animation: pulse }} />
