@@ -18,6 +18,8 @@
 
 ## Status Priority
 
+![Status Priority](docs/assets/priority.svg)
+
 | Priority | Status | Meaning | Color |
 |---|---|---|---|
 | 1 | Error | task failed / abnormal end | red |
@@ -45,6 +47,10 @@
   - `×` removes the card for this round.
 - The panel auto-closes after 5 seconds, or you can click the pill to toggle it.
 - Subagent / Worker sessions do not appear in the card list.
+
+![Stats Pill](docs/assets/stats-pill.svg)
+
+![Card Panel](docs/assets/card-panel.svg)
 
 ## Auto Naming
 

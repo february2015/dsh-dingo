@@ -1,0 +1,17 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="360" height="64" viewBox="0 0 360 64">
+  <rect x="1" y="1" width="358" height="62" rx="31" fill="#181a20" stroke="#3b4252" stroke-width="2"/>
+  <circle cx="34" cy="32" r="8" fill="#ef4444"/>
+  <text x="50" y="37" font-family="sans-serif" font-size="18" fill="#e8e8e8">1</text>
+  <circle cx="82" cy="32" r="8" fill="#f59e0b"/>
+  <text x="98" y="37" font-family="sans-serif" font-size="18" fill="#e8e8e8">2</text>
+  <circle cx="130" cy="32" r="8" fill="#a855f7"/>
+  <text x="146" y="37" font-family="sans-serif" font-size="18" fill="#e8e8e8">1</text>
+  <circle cx="174" cy="32" r="8" fill="#22c55e"/>
+  <text x="190" y="37" font-family="sans-serif" font-size="18" fill="#e8e8e8">3</text>
+  <circle cx="218" cy="32" r="8" fill="#14b8a6"/>
+  <text x="234" y="37" font-family="sans-serif" font-size="18" fill="#e8e8e8">2</text>
+  <path d="M268 24 A8 8 0 1 1 267.9 40" fill="none" stroke="#22d3ee" stroke-width="4" stroke-linecap="round"/>
+  <text x="284" y="37" font-family="sans-serif" font-size="18" fill="#e8e8e8">1</text>
+  <circle cx="314" cy="32" r="8" fill="#9ca3af"/>
+  <text x="330" y="37" font-family="sans-serif" font-size="18" fill="#e8e8e8">2</text>
+</svg>
