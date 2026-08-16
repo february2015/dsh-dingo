@@ -46,6 +46,8 @@ export interface SessionCardView {
   conclusionAt?: number
   /** 执行中是否已经产生中间输出（有内容但未最终完成）。 */
   hasIntermediate?: boolean
+  /** 该会话是否有 TaskSwarm 蜂群批次仍在运行。 */
+  hasSwarm?: boolean
 }
 
 /** `/dingo.feedback {action:'announcements'}` 响应快照。 */
@@ -366,9 +368,13 @@ export function SessionCardRailCompact({ rpc, openSession: openTarget, useSessio
   }
   const panelItems = syntheticCards.length > 0 ? [...items, ...syntheticCards] : items
 
+  // 等待状态 = 后台任务/子任务，或 TaskSwarm 蜂群批次。
+  const isWaiting = (sessionId: string): boolean =>
+    hasBackgroundWork(sessionId) || items.some((card) => card.sessionId === sessionId && card.hasSwarm)
+
   // 排序：草稿/后台等待/中间输出等 client 侧状态一起参与。
   const sortedItems = [...panelItems].sort(
-    (a, b) => cardRank(a, hasDraftFor, hasBackgroundWork) - cardRank(b, hasDraftFor, hasBackgroundWork),
+    (a, b) => cardRank(a, hasDraftFor, isWaiting) - cardRank(b, hasDraftFor, isWaiting),
   )
 
   const errors = items.filter((card) => card.status === 'error')
@@ -376,7 +382,7 @@ export function SessionCardRailCompact({ rpc, openSession: openTarget, useSessio
   const answers = items.filter((card) => card.status === 'answered')
   const running = items.filter((card) => card.status === 'running')
   const normal = items.filter((card) => card.status === 'normal')
-  const waiting = panelItems.filter((card) => hasBackgroundWork(card.sessionId) && (card.status === 'answered' || card.status === 'normal'))
+  const waiting = panelItems.filter((card) => isWaiting(card.sessionId) && (card.status === 'answered' || card.status === 'normal'))
   const intermediate = panelItems.filter((card) => card.status === 'running' && card.hasIntermediate)
   const needsTotal = errors.length + questions.length + answers.length
   // 仅“非当前对话”的草稿才参与顶部提醒；当前对话正在输入是正常状态。
@@ -441,7 +447,7 @@ export function SessionCardRailCompact({ rpc, openSession: openTarget, useSessio
               card={card}
               sessionTitles={sessionTitles as Record<string, { displayTitle?: string }> | undefined}
               isDraft={hasDraftFor(card.sessionId)}
-              isWaiting={hasBackgroundWork(card.sessionId)}
+              isWaiting={isWaiting(card.sessionId)}
               onOpen={handleOpenSession}
               onDismiss={handleDismiss}
             />

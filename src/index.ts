@@ -101,6 +101,10 @@ export function apply(ctx: Context, config: unknown): void {
     config: cfg.feedback as unknown as FeedbackInstallOptions['config'],
     audio,
     logger: (message) => logger.info(message),
+    resolveTaskswarm: () => {
+      const svc = ctx.get('taskswarm') as { getSnapshot(): { batches: Array<{ ownerSessionId?: string; phase: string }> } } | undefined
+      return svc?.getSnapshot().batches ?? []
+    },
     onEnqueue: (item: AnnouncementView) => {
       if (!cfg.systemNotify) return;
       if (item.category === 'normal') return;
