@@ -70,6 +70,13 @@ function truncate(text: string, max: number): string {
   return t.length <= max ? t : `${t.slice(0, max)}…`
 }
 
+/** 从路径取最后一段作为工作区名兜底。 */
+function basename(path?: string): string | undefined {
+  if (!path) return undefined
+  const parts = path.split(/[\\/]/).filter(Boolean)
+  return parts.length > 0 ? parts[parts.length - 1] : undefined
+}
+
 /** 2.0 状态图标：执行中=spinner；有答案=绿方块；有疑问=橙问号；有异常=红感叹号；正常=灰圆点。 */
 function SessionStatusIcon({ status }: { status: SessionCardStatus }): JSX.Element {
   switch (status) {
@@ -284,10 +291,27 @@ export function SessionCardRailCompact({ rpc, openSession: openTarget, useSessio
 
   if (snapshot === undefined || !snapshot.enabled) return null
   const items = snapshot.cards
-  if (items.length === 0) return null
+  // 即使 host 卡片清单为空，只要当前有草稿也要能展示草稿卡。
+  if (items.length === 0 && !hasDraft) return null
+
+  // 如果当前会话有草稿但已被移出卡片清单，补一张客户端草稿卡用于展示。
+  const summary = currentSessionId
+    ? (sessionTitles as Record<string, { displayTitle?: string; cwd?: string }> | undefined)?.[currentSessionId]
+    : undefined
+  const draftCard: SessionCardView | undefined = hasDraft && currentSessionId && !items.some((card) => card.sessionId === currentSessionId)
+    ? {
+        sessionId: currentSessionId,
+        status: 'normal',
+        workspaceTitle: summary?.cwd ? basename(summary.cwd) : undefined,
+        sessionTitle: summary?.displayTitle,
+        createdAt: Date.now(),
+        updatedAt: Date.now(),
+      }
+    : undefined
+  const panelItems = draftCard ? [...items, draftCard] : items
 
   // 草稿态是 client 侧状态，排序时手动插到“执行中”之前。
-  const sortedItems = [...items].sort(
+  const sortedItems = [...panelItems].sort(
     (a, b) => cardRank(a, currentSessionId, hasDraft) - cardRank(b, currentSessionId, hasDraft),
   )
 
