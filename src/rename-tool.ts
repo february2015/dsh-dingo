@@ -11,7 +11,7 @@ import type { Context } from '@deepseek-ai/cordis'
 
 /** 注册 `rename_current_session` 工具；无 tools 服务时静默跳过。 */
 export function installRenameTool(ctx: Context): void {
-  const tools = (ctx as unknown as { tools?: { register(definition: unknown): () => void } }).tools
+  const tools = ctx.get('tools') as { register(definition: unknown): () => void } | undefined
   if (!tools?.register) return
 
   const tool = {

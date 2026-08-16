@@ -36,8 +36,8 @@ function sessionEvent(type: string, data: unknown = {}, extra: Record<string, un
 }
 
 describe('plugin dependencies', () => {
-  it('declares host services before feedback and RPC initialization read them', () => {
-    expect(inject).toEqual(expect.arrayContaining(['connection', 'apiProxy']))
+  it('declares host services before feedback, RPC, and rename-tool initialization read them', () => {
+    expect(inject).toEqual(expect.arrayContaining(['connection', 'apiProxy', 'tools']))
   })
 })
 
