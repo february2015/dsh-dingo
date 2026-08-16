@@ -487,8 +487,10 @@ export class FeedbackEngine {
    * 2.0 同时维护会话 1:1 卡片状态：turn/start → 执行中；
    * turn/end / approval / ask_user / questions → 对应结论态。
    */
-  handleSessionEvent(session: { id: string; header?: { cwd?: string } }, event: SessionEventLike): void {
+  handleSessionEvent(session: { id: string; header?: { cwd?: string }; meta?: { origin?: string; cwd?: string } }, event: SessionEventLike): void {
     if (!this.deps.config.enabled) return;
+    // 子代理/Worker 会话不应出现在用户卡片清单里，也不应触发提醒。
+    if (session.meta?.origin === 'subagent') return;
     const sessionId = String(session.id);
     switch (event.type) {
       case 'session/title': {
@@ -1151,7 +1153,11 @@ export function installFeedback(
 
 /** 会话/事件的最小形状（与 @deepseek-ai/dsh-session 结构兼容，避免强耦合）。 */
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
-export interface SessionLike { readonly id: string; readonly header?: { readonly cwd?: string } }
+export interface SessionLike {
+  readonly id: string
+  readonly header?: { readonly cwd?: string }
+  readonly meta?: { readonly origin?: string; readonly cwd?: string }
+}
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 type SessionEventLike = { type: string; [key: string]: any };

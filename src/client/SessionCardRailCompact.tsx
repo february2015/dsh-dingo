@@ -350,13 +350,15 @@ export function SessionCardRailCompact({ rpc, openSession: openTarget, useSessio
   if (items.length === 0) return null
 
   // 补卡：有草稿或后台任务/子任务，但已被移出 host 卡片清单的会话，在面板中仍展示。
-  const summaries = (sessionTitles ?? {}) as Record<string, { displayTitle?: string; cwd?: string }>
+  const summaries = (sessionTitles ?? {}) as Record<string, { displayTitle?: string; cwd?: string; origin?: string }>
   const syntheticCards: SessionCardView[] = []
   for (const id of allSessionIds) {
     const sid = String(id)
+    const info = summaries[sid]
+    // 子代理/Worker 会话不进入卡片清单。
+    if (info?.origin === 'subagent') continue
     if (items.some((card) => card.sessionId === sid)) continue
     if (!hasDraftFor(sid) && !hasBackgroundWork(sid)) continue
-    const info = summaries[sid]
     syntheticCards.push({
       sessionId: sid,
       status: 'normal',
