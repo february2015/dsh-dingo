@@ -483,6 +483,7 @@ export function SessionCardRailCompact({ rpc, openSession: openTarget, useSessio
               key={card.sessionId}
               card={card}
               sessionTitles={sessionTitles as Record<string, { displayTitle?: string }> | undefined}
+              isCurrent={card.sessionId === currentSessionId}
               isDraft={hasDraftFor(card.sessionId)}
               isWaiting={isWaiting(card.sessionId)}
               dsJobsCount={backgroundJobCount(card.sessionId)}
@@ -501,6 +502,7 @@ export function SessionCardRailCompact({ rpc, openSession: openTarget, useSessio
 function DetailedCard({
   card,
   sessionTitles,
+  isCurrent,
   isDraft,
   isWaiting,
   dsJobsCount,
@@ -510,6 +512,7 @@ function DetailedCard({
 }: {
   card: SessionCardView
   sessionTitles?: Record<string, { displayTitle?: string; cwd?: string }>
+  isCurrent?: boolean
   isDraft?: boolean
   isWaiting?: boolean
   dsJobsCount?: number
@@ -534,6 +537,8 @@ function DetailedCard({
       data-status={card.status}
       onClick={() => onOpen(card)}
     >
+      {isCurrent && <span style={styles.currentBar} />}
+      {isCurrent && <span style={styles.currentTag}>当前</span>}
       <SessionStatusIcon status={card.status} />
       <span style={styles.body}>
         <span style={styles.workspace}>
@@ -668,6 +673,7 @@ const styles: Record<string, React.CSSProperties> = {
     boxShadow: '0 8px 30px rgba(0,0,0,0.45)',
   },
   full: {
+    position: 'relative',
     display: 'flex',
     alignItems: 'center',
     gap: 8,
@@ -683,6 +689,27 @@ const styles: Record<string, React.CSSProperties> = {
     border: '1px solid transparent',
     userSelect: 'none',
     WebkitUserSelect: 'none',
+  },
+  currentBar: {
+    position: 'absolute',
+    left: 0,
+    top: 8,
+    bottom: 8,
+    width: 4,
+    borderRadius: 2,
+    background: '#60a5fa',
+  },
+  currentTag: {
+    position: 'absolute',
+    top: 4,
+    right: 26,
+    fontSize: 10,
+    fontWeight: 600,
+    color: '#60a5fa',
+    background: 'rgba(96,165,250,0.15)',
+    padding: '1px 5px',
+    borderRadius: 4,
+    pointerEvents: 'none',
   },
   // 状态图标
   iconRunning: {
