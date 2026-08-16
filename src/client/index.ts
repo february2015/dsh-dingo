@@ -104,7 +104,7 @@ export function apply(ctx: ClientContext): void {
     return ctx.slots.inject('conversation.session.header.utilities', () => ctx.slots.register({
       name: 'conversation.session.header.utilities',
       id: 'dsh-dingo-card-rail',
-      order: 0,
+      order: -100,
       inject: () => ({
         rpc,
         getDraftBySession,
