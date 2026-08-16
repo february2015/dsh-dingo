@@ -50,6 +50,16 @@
 | Natural language in chat | main LLM generates title, then calls `rename_current_session` tool |
 | `/dingo rename` | fallback command using the independent Flash path |
 
+## TaskSwarm Integration
+
+dsh-dingo can work with [dsh-taskswarm](https://github.com/february2015/dsh-taskswarm):
+
+- TaskSwarm exposes a standard Cordis service via `ctx.get('taskswarm')`.
+- dsh-dingo reads active batches from it.
+- If a session started a swarm batch that is still running, its card shows the **waiting / swarm** state even after the main conversation has finished.
+
+Both plugins can be used independently or together.
+
 ## Commands
 
 ```

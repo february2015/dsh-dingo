@@ -69,6 +69,19 @@
 
 ---
 
+## 与 TaskSwarm（蜂群）配合
+
+dsh-dingo 可以和 [dsh-taskswarm](https://github.com/february2015/dsh-taskswarm) 配合：
+
+- TaskSwarm 通过标准 Cordis 服务暴露 `ctx.get('taskswarm')`；
+- dsh-dingo 会读取其中的活跃批次；
+- 如果某个主对话发起的蜂群还在跑，即使主对话已经完成，卡片也会显示**等待后台/蜂群**状态；
+- 这样你在卡片面板里就能看到“主对话已完成，但蜂群还在跑”的未完成状态。
+
+两个插件可以独立使用，也可以组合使用。
+
+---
+
 ## 命令
 
 ```
