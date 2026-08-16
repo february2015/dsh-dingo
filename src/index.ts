@@ -20,6 +20,7 @@ import { installFeedback, type FeedbackAudio, type FeedbackEngine, type Feedback
 import { installDingoRpc } from './rpc.ts';
 import { registerDingoCommand } from './command.ts';
 import { autoNameSession } from './auto-name.ts';
+import { installRenameTool } from './rename-tool.ts';
 import { sendSystemNotification } from './sysnotify.ts';
 import type { ChannelAuthority } from './types.ts';
 
@@ -134,6 +135,9 @@ export function apply(ctx: Context, config: unknown): void {
       webVisible = visible;
     },
   }, cfg.channelAuthority as ChannelAuthority);
+
+  // 对话内自然语言重命名：主 LLM 在当前上下文生成标题后调用本工具写入
+  installRenameTool(ctx);
 
   registerDingoCommand(ctx, {
     runtime: {
