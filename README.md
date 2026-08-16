@@ -22,7 +22,7 @@
 | 2 | Question | needs your answer | orange |
 | 3 | Draft | another session has unsent input | purple |
 | 4 | To Read | completed and needs reading | green |
-| 5 | Waiting | main done, background/subtasks still running | teal |
+| 5 | Waiting | main done, background/subtasks/swarm still running | teal |
 | 6 | Intermediate | running with partial output | cyan |
 | 7 | Running | running | blue spinner |
 | 8 | Normal | completed and seen | grey |
