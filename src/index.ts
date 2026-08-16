@@ -89,9 +89,9 @@ export function apply(ctx: Context, config: unknown): void {
   };
 
   // ── 反馈引擎（事件源 → 队列 → 提示音/卡片） ────────────────────────
-  // 系统通知：其他对话的需回答/完成/失败入队时发一条系统级通知（点击直达会话）；
-  // 当前对话（own）不发（浏览器内叮当音已够），normal 类也不发；
-  // DSH Web UI 前台可见时也不发（浏览器内提醒已够）——可见性由客户端经
+  // 系统通知：DSH 不在前台（webVisible=false）时，任何对话的需回答/完成/失败
+  // 入队都发一条系统级通知（含当前对话——你切走了，浏览器内叮当音可能听不到）；
+  // DSH Web UI 前台可见时不发（浏览器内提醒已够）。可见性由客户端经
   // /dingo.set-visibility 上报，未上报（Web 未开）视为不可见 → 发系统通知。
   let webVisible = false;
   const webuiBaseUrl = cfg.systemNotifyBaseUrl || 'http://127.0.0.1:3080';
@@ -101,7 +101,6 @@ export function apply(ctx: Context, config: unknown): void {
     logger: (message) => logger.info(message),
     onEnqueue: (item: AnnouncementView) => {
       if (!cfg.systemNotify) return;
-      if (item.own === true) return;
       if (item.category === 'normal') return;
       if (item.sessionId === undefined || item.sessionId === '') return;
       if (webVisible) return; // Web UI 在前台 → 浏览器内提醒已够

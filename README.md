@@ -42,7 +42,7 @@ Current conversation replies → **dang / dang-dang** (crisp tone set); other co
 - `/dingo off` disables all reminders.
 
 **System notifications** (macOS Notification Center / Windows toast, optional):
-- When another conversation needs your answer / replies / fails, a **system-level notification** is sent in addition to the in-browser card — so you notice even while working in another app;
+- When **any conversation** needs your answer / replies / fails **while the DSH Web UI is not in the foreground**, a **system-level notification** is sent — so you notice even while working in another app (the current conversation included, since you're not looking at it);
 - **Two channels, distinct jobs**: the system notification tells you *something happened*; the in-browser card (always visible while the Web UI is open) tells you *which conversation* — click it to jump straight there;
 - **Windows**: clicking the notification itself also jumps straight to the conversation (deep link `?dingOpen=`);
 - **macOS**: the notification is a reminder only (no click callback — a macOS system limit; the in-browser card handles the jump);
