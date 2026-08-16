@@ -54,7 +54,7 @@ const styles: Record<string, React.CSSProperties> = {
     alignItems: 'center',
     height: 28,
     padding: '0 10px',
-    borderRadius: 999,
+    borderRadius: 6,
     border: '1px solid rgba(120,140,180,0.25)',
     background: 'rgba(24, 26, 32, 0.5)',
     color: '#9aa3b2',
