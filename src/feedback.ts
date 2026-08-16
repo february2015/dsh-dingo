@@ -455,6 +455,12 @@ export class FeedbackEngine {
     card.updatedAt = this.now();
   }
 
+  /** 异步解析工作区标题并补到卡片上（不阻塞事件处理）。 */
+  private async updateCardWorkspace(sessionId: string, cwd?: string): Promise<void> {
+    const title = await this.resolveWorkspaceTitle(sessionId, cwd);
+    if (title) this.updateCardMeta(sessionId, { workspaceTitle: title });
+  }
+
   // ── 事件入口（五事件源） ──
 
   /**
@@ -478,6 +484,7 @@ export class FeedbackEngine {
       }
       case 'turn/start': {
         this.setCardStatus(sessionId, 'running');
+        void this.updateCardWorkspace(sessionId, session.header?.cwd);
         return;
       }
       case 'assistant/message': {
@@ -503,14 +510,17 @@ export class FeedbackEngine {
           // 含疑问/请求确认 → "需回答"（当当 2 声），否则 "有回复"（当 1 声）
           if (isQuestionText(text)) {
             this.setCardStatus(sessionId, 'question');
+            void this.updateCardWorkspace(sessionId, session.header?.cwd);
             void this.announceNeedConfirm(sessionId, text || '有新内容需要你回答', 'session/turn-end');
           } else {
             this.setCardStatus(sessionId, 'answered');
+            void this.updateCardWorkspace(sessionId, session.header?.cwd);
             void this.announceTaskDone(sessionId, session.header?.cwd, text, 'session/turn-end');
           }
         } else {
           // aborted / error / max-tokens / blocked / interrupted → 异常结束
           this.setCardStatus(sessionId, 'error');
+          void this.updateCardWorkspace(sessionId, session.header?.cwd);
         }
         return;
       }
@@ -519,12 +529,14 @@ export class FeedbackEngine {
         // 需回答类：当前对话也提醒（用户要看对话里的审批请求；broadcast 只处理文本回复）
         const summary = data?.toolName ? `${data.toolName}${data.reason ? `：${data.reason}` : ''}` : (data?.reason ?? '工具调用');
         this.setCardStatus(sessionId, 'question');
+        void this.updateCardWorkspace(sessionId, session.header?.cwd);
         void this.announceNeedConfirm(sessionId, summary, 'approval');
         return;
       }
       case 'approval/decided': {
         // 用户已处理审批，agent 继续执行 → 回到执行中（若尚未 turn/end）
         this.setCardStatus(sessionId, 'running');
+        void this.updateCardWorkspace(sessionId, session.header?.cwd);
         return;
       }
       case 'tool/call': {
@@ -532,6 +544,7 @@ export class FeedbackEngine {
         const tool = String((event as SessionEventLike & { data?: { name?: string } }).data?.name ?? '').toLowerCase();
         if (/ask[_-]?user/.test(tool)) {
           this.setCardStatus(sessionId, 'question');
+          void this.updateCardWorkspace(sessionId, session.header?.cwd);
           void this.announceNeedConfirm(sessionId, '有新问题需要你回答', 'tool-ask-user');
         }
         return;
@@ -550,7 +563,10 @@ export class FeedbackEngine {
     if (snapshot.status === 'completed') {
       void this.announceTaskDone(sessionId, undefined, label, 'jobs');
     } else if (snapshot.status === 'failed') {
-      if (sessionId !== undefined) this.setCardStatus(sessionId, 'error');
+      if (sessionId !== undefined) {
+        this.setCardStatus(sessionId, 'error');
+        void this.updateCardWorkspace(sessionId);
+      }
       void this.announceTaskError(sessionId, label, snapshot.detail ?? '任务执行失败', 'jobs');
     }
     // killed → 不播
@@ -562,7 +578,10 @@ export class FeedbackEngine {
     const sessionId = input.sessionId;
     const first = input.questions[0];
     const summary = first?.text?.trim() || first?.title?.trim() || '有新问题需要你回答';
-    if (sessionId !== undefined) this.setCardStatus(sessionId, 'question');
+    if (sessionId !== undefined) {
+      this.setCardStatus(sessionId, 'question');
+      void this.updateCardWorkspace(sessionId);
+    }
     void this.announceNeedConfirm(sessionId, summary, 'questions');
   }
 

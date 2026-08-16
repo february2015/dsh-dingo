@@ -291,8 +291,8 @@ export function SessionCardRailCompact({ rpc, openSession: openTarget, useSessio
 
   if (snapshot === undefined || !snapshot.enabled) return null
   const items = snapshot.cards
-  // 即使 host 卡片清单为空，只要当前有草稿也要能展示草稿卡。
-  if (items.length === 0 && !hasDraft) return null
+  // 当前对话正在输入是正常状态，不需要因为草稿单独从顶部提示；没有其他卡片时就不显示统计。
+  if (items.length === 0) return null
 
   // 如果当前会话有草稿但已被移出卡片清单，补一张客户端草稿卡用于展示。
   const summary = currentSessionId
@@ -321,10 +321,11 @@ export function SessionCardRailCompact({ rpc, openSession: openTarget, useSessio
   const running = items.filter((card) => card.status === 'running')
   const normal = items.filter((card) => card.status === 'normal')
   const needsTotal = errors.length + questions.length + answers.length
-  const priority = errors.length > 0 ? 'error' : questions.length > 0 ? 'question' : hasDraft ? 'draft' : answers.length > 0 ? 'answered' : undefined
-  const priorityCount = priority === 'draft' ? 1 : needsTotal
+  // 草稿是当前对话的正常输入状态，不参与顶部闪烁提醒。
+  const priority = errors.length > 0 ? 'error' : questions.length > 0 ? 'question' : answers.length > 0 ? 'answered' : undefined
+  const priorityCount = needsTotal
 
-  const priorityColor = priority === 'error' ? '#ef4444' : priority === 'question' ? '#f59e0b' : priority === 'draft' ? '#a855f7' : priority === 'answered' ? '#22c55e' : undefined
+  const priorityColor = priority === 'error' ? '#ef4444' : priority === 'question' ? '#f59e0b' : priority === 'answered' ? '#22c55e' : undefined
   const pulse = priority ? 'lv-fb-pulse 1s ease-in-out infinite' : undefined
 
   const summaryStyle: React.CSSProperties = {
