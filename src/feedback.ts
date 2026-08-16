@@ -490,7 +490,7 @@ export class FeedbackEngine {
   handleSessionEvent(session: { id: string; header?: { cwd?: string }; meta?: { origin?: string; cwd?: string } }, event: SessionEventLike): void {
     if (!this.deps.config.enabled) return;
     // 子代理/Worker 会话不应出现在用户卡片清单里，也不应触发提醒。
-    if (session.meta?.origin === 'subagent') return;
+    if (isTaskSwarmWorkerSession(session)) return;
     const sessionId = String(session.id);
     switch (event.type) {
       case 'session/title': {
@@ -1157,6 +1157,13 @@ export interface SessionLike {
   readonly id: string
   readonly header?: { readonly cwd?: string }
   readonly meta?: { readonly origin?: string; readonly cwd?: string }
+}
+
+/** 判断是否 TaskSwarm 子 Worker / 子代理会话（不应出现在用户卡片清单）。 */
+function isTaskSwarmWorkerSession(session: { header?: { cwd?: string }; meta?: { origin?: string; cwd?: string } }): boolean {
+  if (session.meta?.origin === 'subagent') return true
+  const cwd = session.meta?.cwd ?? session.header?.cwd
+  return typeof cwd === 'string' && /[\\/]\.taskswarm[\\/]worktrees[\\/]/.test(cwd)
 }
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any

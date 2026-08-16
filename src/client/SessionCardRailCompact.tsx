@@ -363,6 +363,7 @@ export function SessionCardRailCompact({ rpc, openSession: openTarget, useSessio
     const info = summaries[sid]
     // 子代理/Worker 会话不进入卡片清单。
     if (info?.origin === 'subagent') continue
+    if (info?.cwd && /[\\/]\.taskswarm[\\/]worktrees[\\/]/.test(info.cwd)) continue
     if (items.some((card) => card.sessionId === sid)) continue
     if (!hasDraftFor(sid) && !hasBackgroundWork(sid)) continue
     syntheticCards.push({
