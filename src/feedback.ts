@@ -498,7 +498,7 @@ export class FeedbackEngine {
    * 2.0 同时维护会话 1:1 卡片状态：turn/start → 执行中；
    * turn/end / approval / ask_user / questions → 对应结论态。
    */
-  handleSessionEvent(session: { id: string; header?: { cwd?: string }; meta?: { origin?: string; cwd?: string } }, event: SessionEventLike): void {
+  handleSessionEvent(session: { id: string; header?: { cwd?: string; origin?: string }; meta?: { origin?: string; cwd?: string } }, event: SessionEventLike): void {
     if (!this.deps.config.enabled) return;
     // 子代理/Worker 会话不应出现在用户卡片清单里，也不应触发提醒。
     if (isTaskSwarmWorkerSession(session)) return;
@@ -1166,13 +1166,13 @@ export function installFeedback(
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 export interface SessionLike {
   readonly id: string
-  readonly header?: { readonly cwd?: string }
+  readonly header?: { readonly cwd?: string; readonly origin?: string }
   readonly meta?: { readonly origin?: string; readonly cwd?: string; readonly taskswarmWorker?: boolean }
 }
 
 /** 判断是否 TaskSwarm 子 Worker / 子代理会话（不应出现在用户卡片清单）。 */
-function isTaskSwarmWorkerSession(session: { header?: { cwd?: string }; meta?: { origin?: string; cwd?: string; taskswarmWorker?: boolean } }): boolean {
-  if (session.meta?.origin === 'subagent') return true
+function isTaskSwarmWorkerSession(session: { header?: { cwd?: string; origin?: string }; meta?: { origin?: string; cwd?: string; taskswarmWorker?: boolean } }): boolean {
+  if (session.header?.origin === 'subagent' || session.meta?.origin === 'subagent') return true
   if (session.meta?.taskswarmWorker === true) return true
   const cwd = session.meta?.cwd ?? session.header?.cwd
   return typeof cwd === 'string' && /[\\/]\.taskswarm[\\/]worktrees[\\/]/.test(cwd)
