@@ -560,6 +560,7 @@ const styles: Record<string, React.CSSProperties> = {
     display: 'inline-flex',
     alignItems: 'center',
     flex: 'none',
+    marginLeft: 'auto',
   },
   summary: {
     display: 'inline-flex',
