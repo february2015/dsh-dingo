@@ -390,7 +390,7 @@ export function SessionCardRailCompact({ rpc, openSession: openTarget, useSessio
   const answers = items.filter((card) => card.status === 'answered')
   const running = panelItems.filter((card) => card.status === 'running' && card.sessionId !== currentSessionId)
   const normal = items.filter((card) => card.status === 'normal')
-  const waiting = panelItems.filter((card) => isWaiting(card.sessionId) && (card.status === 'answered' || card.status === 'normal'))
+  const waiting = panelItems.filter((card) => isWaiting(card.sessionId) && card.sessionId !== currentSessionId && (card.status === 'answered' || card.status === 'normal'))
   const intermediate = panelItems.filter((card) => card.status === 'running' && card.hasIntermediate && card.sessionId !== currentSessionId)
   const needsTotal = errors.length + questions.length + answers.length
   // 仅“非当前对话”的草稿才参与顶部提醒；当前对话正在输入是正常状态。
