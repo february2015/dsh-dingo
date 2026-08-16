@@ -70,7 +70,7 @@ function sendMacNotification(options: SystemNotifyOptions): void {
   const title = options.title ?? 'DSH 提醒';
   const esc = (s: string): string => s.replace(/\\/g, '\\\\').replace(/"/g, '\\"');
   const script = `display notification "${esc(options.message)}" with title "${esc(title)}" sound name "Glass"`;
-  const child = spawn('osascript', ['-e', script], { stdio: 'ignore' });
+  const child = spawn('/usr/bin/osascript', ['-e', script], { stdio: 'ignore' });
   child.on('error', (error: NodeJS.ErrnoException) => {
     log(`[dingo-sysnotify] osascript 启动失败: ${error.message}`);
   });
