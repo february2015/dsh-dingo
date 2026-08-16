@@ -461,13 +461,15 @@ function DetailedCard({
   onDismiss,
 }: {
   card: SessionCardView
-  sessionTitles?: Record<string, { displayTitle?: string }>
+  sessionTitles?: Record<string, { displayTitle?: string; cwd?: string }>
   isDraft?: boolean
   isWaiting?: boolean
   onOpen: (card: SessionCardView) => void
   onDismiss: (sessionId: string) => void
 }): JSX.Element {
   const title = card.sessionTitle ?? sessionTitles?.[card.sessionId]?.displayTitle ?? ''
+  const cwd = sessionTitles?.[card.sessionId]?.cwd
+  const workspaceTitle = card.workspaceTitle ?? (cwd ? basename(cwd) : undefined)
   const intermediate = card.status === 'running' && card.hasIntermediate
   return (
     <div
@@ -484,7 +486,7 @@ function DetailedCard({
     >
       <SessionStatusIcon status={card.status} />
       <span style={styles.body}>
-        <span style={styles.workspace}>{truncate(card.workspaceTitle ?? '', 16) || '（无工作区）'}</span>
+        <span style={styles.workspace}>{truncate(workspaceTitle ?? '', 16) || '（无工作区）'}</span>
         <span style={styles.session}>
           {truncate(title, 20) || '（未命名对话）'}
           {isDraft ? ' ✎' : ''}
