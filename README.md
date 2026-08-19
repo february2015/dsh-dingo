@@ -6,7 +6,7 @@
 
 Hear it, reach it: when another conversation replies, a tone alerts you and a small card appears — **one click takes you straight to that conversation**; and when you've switched to another app, a **system notification** (macOS Notification Center / Windows toast) still gets through — click it to jump right in. It doesn't just tell you "something happened"; it puts you in front of the conversation (the core capability that sets it apart from plain notifiers).
 
-**Great when you run many conversations in parallel**: open several chats (including subagents) side by side and stop watching them one by one — when any of them replies, you hear a distinct tone and the card shows the workspace/conversation name; click it and you're there. Never miss a reply while you work on something else, and switch between tasks with ease.
+**Great when you run many conversations in parallel**: open several chats side by side and stop watching them one by one — when a conversation replies, you hear a distinct tone and the card shows the workspace/conversation name; click it and you're there. Top-level conversations always alert; subagent reminders are quiet by default and can be enabled with the policy options below.
 
 Current conversation replies → **dang / dang-dang** (crisp tone set); other conversations → **another sound (ding, soft tone set)** + a top-right **card**; click the card to **jump straight to** that conversation. Reminders fire only on a turn's **final reply** (or a question awaiting you) — in-between progress messages stay quiet. Pure event-driven and lightweight.
 
@@ -42,7 +42,7 @@ Current conversation replies → **dang / dang-dang** (crisp tone set); other co
 - `/dingo off` disables all reminders.
 
 **System notifications** (macOS Notification Center / Windows toast, optional):
-- When **any conversation** needs your answer / replies / fails **while the DSH Web UI is not in the foreground**, a **system-level notification** is sent — so you notice even while working in another app (the current conversation included, since you're not looking at it);
+- When a non-suppressed conversation needs your answer / replies / fails **while the DSH Web UI is not in the foreground**, a **system-level notification** is sent — subagent items filtered by the policy above never reach either notification channel;
 - **Two channels, distinct jobs**: the system notification tells you *something happened*; the in-browser card (always visible while the Web UI is open) tells you *which conversation* — click it to jump straight there;
 - **Windows**: clicking the notification itself also jumps straight to the conversation (deep link `?dingOpen=`);
 - **macOS**: the notification is a reminder only (no click callback — a macOS system limit; the in-browser card handles the jump);
@@ -82,6 +82,10 @@ Overridable in the profile's `cordis.patch.yml` or plugin config:
       toneStyle: soft        # tone set: soft (other conversations "ding") / crisp (current conversation "dang")
       dnd: false
       dedupeWindowMs: 10000  # same-conversation same-content dedup window (same reminder won't repeat, different ones ring)
+      suppressSubagentNotifications: true  # suppress all subagent reminders by default
+      allowSubagentNeedConfirm: false      # optional exception for subagent questions/approvals
+      allowSubagentTaskError: false        # optional exception for subagent failures
+      announceSubagentSessions: false      # legacy alias: false = suppressed, true = announced (overrides default)
       quietHours: { start: '', end: '' }
     # systemNotify: true       # system notifications for other conversations (default on)
     # systemNotifyBaseUrl: ''  # deep-link base URL (default http://127.0.0.1:3080)
@@ -92,13 +96,15 @@ Overridable in the profile's `cordis.patch.yml` or plugin config:
 ```
 /dingo on|off        # enable/disable reminders
 /dingo status        # enabled/DND/queue status
-/dingo dnd [on|off]  # do-not-disturb (task-completion silent, needs-answer still alerts)
+/dingo dnd [on|off]          # do-not-disturb (task-completion silent, needs-answer still alerts)
+/dingo subagents [on|off]   # legacy all-subagent switch (default off)
 ```
 
 ## Architecture
 
 - **host half** (`src/index.ts` + `src/feedback.ts`):
   - Subscribes to `session/event`: `turn/end(completed)` / `approval/asked` / `tool/call(ask_user)` / `assistant/message` → classifies → enqueues (priority: needs-answer > reply > failure);
+  - Subagent sessions are identified only by durable `SessionHeader.origin === 'subagent'`; other origin values and missing origin fail open, and `parentSession` alone does not suppress a session. By default all subagent reminders are suppressed; `allowSubagentNeedConfirm` and `allowSubagentTaskError` can opt in to only those exception categories. The legacy `feedback.announceSubagentSessions` / `/dingo subagents on` switch enables all subagent reminders;
   - Current-conversation replies (from the client's reported active session) → own reminder (tone only, no card);
   - Queue plays serially by priority; the client reports `spoken` before the next item plays;
 - **client half** (`src/client/FeedbackCard.tsx` + `tones.ts`):

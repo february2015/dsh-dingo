@@ -1,10 +1,11 @@
 /**
- * `/dingo` 斜杠命令（on|off|status|dnd）。
+ * `/dingo` 斜杠命令（on|off|status|dnd|subagents）。
  *
  * - `on` / `off`：切换提醒功能运行时开关；
  * - `status`：报告开关、DND、插播队列（当前/其他对话提醒计数）；
  * - `dnd on|off`：免打扰切换（任务完成类静音、确认类默认仍播）；
- *   `dnd`（无参）= 查询。
+ *   `dnd`（无参）= 查询；
+ * - `subagents on|off`：控制是否提醒子代理会话；`subagents`（无参）= 查询。
  *
  * @module dsh-dingo/command
  */
@@ -19,6 +20,8 @@ export interface DingoCommandDeps {
     setEnabled(value: boolean): boolean;
     dnd(): boolean;
     setDnd(value: boolean): boolean;
+    announceSubagentSessions(): boolean;
+    setAnnounceSubagentSessions(value: boolean): boolean;
     feedback(): ReturnType<FeedbackEngine['snapshot']>;
   };
 }
@@ -29,8 +32,8 @@ export function registerDingoCommand(ctx: Context, deps: DingoCommandDeps): void
   if (commands === undefined) return; // headless deployments without the command registry
   commands.register({
     name: 'dingo',
-    description: 'dsh-dingo: on|off|status|dnd',
-    input: { hint: 'on | off | status | dnd [on|off]' },
+    description: 'dsh-dingo: on|off|status|dnd|subagents',
+    input: { hint: 'on | off | status | dnd [on|off] | subagents [on|off]' },
     handler: (invocation) => dingoCommand(invocation, deps),
   });
 }
@@ -51,7 +54,15 @@ async function dingoCommand(invocation: CommandInvocation, deps: DingoCommandDep
     const tip = dnd ? '免打扰已开启：任务完成类提醒静音（需回答仍提醒）。' : '免打扰已关闭。';
     return { kind: 'success', text: `dsh-dingo dnd: ${dnd ? 'on' : 'off'}. ${tip}` };
   }
-  return { kind: 'error', text: 'dsh-dingo: unknown argument — use on | off | status | dnd [on|off].' };
+  if (raw === 'subagents' || raw === 'subagent' || raw === 'subagents on' || raw === 'subagents off' || raw === 'subagent on' || raw === 'subagent off') {
+    if (raw.endsWith(' on') || raw.endsWith(' off')) {
+      deps.runtime.setAnnounceSubagentSessions(raw.endsWith(' on'));
+    }
+    const enabled = !deps.runtime.feedback().suppressSubagentNotifications;
+    const tip = enabled ? '子代理提醒已开启。' : '子代理提醒已关闭：子代理完成、提问和失败不会弹出提醒。';
+    return { kind: 'success', text: `dsh-dingo subagents: ${enabled ? 'on' : 'off'}. ${tip}` };
+  }
+  return { kind: 'error', text: 'dsh-dingo: unknown argument — use on | off | status | dnd [on|off] | subagents [on|off].' };
 }
 
 /** 组装 `/dingo status` 文案。 */
@@ -60,7 +71,7 @@ function statusText(deps: DingoCommandDeps): string {
   const pending = feedback.queue.filter((item) => item.state === 'pending' || item.state === 'deferred').length;
   const speaking = feedback.queue.find((item) => item.state === 'speaking');
   return [
-    `dsh-dingo: ${deps.runtime.enabled() ? 'on' : 'off'} · dnd: ${deps.runtime.dnd() ? 'on' : 'off'}`,
+    `dsh-dingo: ${deps.runtime.enabled() ? 'on' : 'off'} · dnd: ${deps.runtime.dnd() ? 'on' : 'off'} · subagents: ${feedback.suppressSubagentNotifications ? 'suppressed' : 'announced'}`,
     `feedback: enabled · queue ${pending} pending · ${speaking ? `speaking「${speaking.text}」` : 'idle'}`,
     `  quietNow: ${feedback.quietNow ? 'yes' : 'no'} · dedupeWindow: ${feedback.dedupeWindowMs}ms`,
     'Use /dingo on|off to enable/disable reminders.',

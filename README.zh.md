@@ -6,7 +6,7 @@
 
 听到即到达：其他对话回复时出声提醒你，右上角卡片**点一下直达对应对话**——切到别的应用时，**系统级通知**（macOS 通知中心 / Windows toast）也不会漏，点一下同样直达。不只是告诉你"有动静"，而是直接把你送到对话面前（这是区别于纯提醒方案的核心能力）。
 
-**多对话并行时的得力助手**：DSH 里同时开好几个对话（含子代理）并行干活时，不用挨个盯着——哪个对话有回复，出声提醒你 + 卡片标注工作区/对话名；点一下直达那个对话，处理完继续干别的。提醒不打扰，直达不迷路，多任务并行也能从容切换。
+**多对话并行时的得力助手**：DSH 里同时开好几个对话并行干活时，不用挨个盯着——顶层对话有回复时会出声提醒并显示工作区/对话卡片；子代理默认静默，可通过下方策略开关选择性或全部开启。点卡片即可直达对应对话。
 
 当前对话回复 → **当 / 当当** 提示音区分（crisp 清脆档）；其他对话回复 → **另一套声音（叮，soft 柔和档）** + 右上角**小卡片**，点击卡片**直达**对应对话。提醒只在**最终回复**（或等你回答的提问）时触发，过程中的中间回复不打扰。纯事件驱动，轻量。
 
@@ -42,7 +42,7 @@
 - `/dingo off` 一键关闭全部提醒。
 
 **系统级通知**（macOS 通知中心 / Windows toast，可选）：
-- **DSH Web UI 不在前台时**，任何对话（含当前对话）**需回答 / 有回复 / 任务失败**都会发**系统通知**——切到别的应用也不错过；
+- **DSH Web UI 不在前台时**，未被策略静默的对话**需回答 / 有回复 / 任务失败**会发**系统通知**——被静默的子代理事件不会进入声音、卡片或系统通知任一通道；
 - **双通道、各司其职**：系统通知告诉你"有动静"；浏览器内卡片（DSH 界面开着就一直有）告诉你"是哪个对话"——点卡片直达；
 - **Windows**：点击系统通知本身也可直达对应会话（深链 `?dingOpen=`）；
 - **macOS**：系统通知仅作提醒（无点击回调，macOS 系统限制；直达由浏览器内卡片完成）；
@@ -82,6 +82,10 @@ profile 的 `cordis.patch.yml` 或插件配置里可覆盖：
       toneStyle: soft        # 提示音档位：soft（其他对话"叮"）/ crisp（当前对话"当"）
       dnd: false
       dedupeWindowMs: 10000  # 同会话同内容去重窗口（同样提示不重复、不同样各自响）
+      suppressSubagentNotifications: true  # 默认静默所有子代理提醒
+      allowSubagentNeedConfirm: false      # 可选：放行子代理提问/审批提醒
+      allowSubagentTaskError: false        # 可选：放行子代理失败提醒
+      announceSubagentSessions: false      # 旧别名：false=静默，true=全部提醒（可覆盖默认抑制）
       quietHours: { start: '', end: '' }
     # systemNotify: true       # 其他对话的系统级通知（默认开）
     # systemNotifyBaseUrl: ''  # 深链基地址（默认 http://127.0.0.1:3080）
@@ -92,13 +96,15 @@ profile 的 `cordis.patch.yml` 或插件配置里可覆盖：
 ```
 /dingo on|off        # 开/关提醒
 /dingo status        # 开关、DND、插播队列
-/dingo dnd [on|off]  # 免打扰（任务完成类静音、需回答仍提醒）
+/dingo dnd [on|off]         # 免打扰（任务完成类静音、需回答仍提醒）
+/dingo subagents [on|off]  # 旧版：一次性开关全部子代理提醒（默认关闭）
 ```
 
 ## 技术实现（架构）
 
 - **host 半**（`src/index.ts` + `src/feedback.ts`）：
   - 订阅 `session/event`：`turn/end(completed)` / `approval/asked` / `tool/call(ask_user)` / `assistant/message` → 判定级别 → 入提醒队列（优先级：需回答 > 有回复 > 失败）；
+  - 子代理会话只通过持久化 `SessionHeader.origin === 'subagent'` 识别；其他 origin 值或缺失来源均 fail-open，仅有 `parentSession` 不会触发静默。默认静默所有子代理提醒；可用 `allowSubagentNeedConfirm` 和 `allowSubagentTaskError` 分别放行提问/审批或失败提醒。旧配置 `feedback.announceSubagentSessions` / `/dingo subagents on` 仍可一次性开启全部子代理提醒；
   - 当前对话回复（客户端上报的当前查看会话）→ 直接入队 own 提醒（只播提示音、不显示卡片）；
   - 队列按优先级串行播报，客户端 `spoken` 上报后播下一条；
 - **client 半**（`src/client/FeedbackCard.tsx` + `tones.ts`）：

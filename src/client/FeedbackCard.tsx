@@ -46,6 +46,10 @@ export interface FeedbackSnapshotView {
   enabled: boolean
   dnd: boolean
   confirmNeverSilent: boolean
+  suppressSubagentNotifications: boolean
+  allowSubagentNeedConfirm: boolean
+  allowSubagentTaskError: boolean
+  announceSubagentSessions: boolean
   quietNow: boolean
   activeSessionId?: string
   /** T-8 音效打磨：提示音档位（soft 柔和 / crisp 清脆），client 按此选音。 */

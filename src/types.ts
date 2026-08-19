@@ -25,6 +25,14 @@ export interface Config {
     dedupeWindowMs: number;
     /** 同会话自身事件是否也插播（默认 false = 当前对话自身事件由"当/当当"提示音处理）。 */
     announceOwnSessions: boolean;
+    /** 子代理通知是否被抑制（默认 true）。现代字段兼容旧调用者可省略。 */
+    suppressSubagentNotifications?: boolean;
+    /** 子代理需回答提醒是否例外放行（默认 false）。 */
+    allowSubagentNeedConfirm: boolean;
+    /** 子代理任务失败提醒是否例外放行（默认 false）。 */
+    allowSubagentTaskError: boolean;
+    /** 兼容旧配置：true 等价于 suppressSubagentNotifications=false。 */
+    announceSubagentSessions: boolean;
     /** 静音时段（"HH:mm" 24h；空串 = 无；start>end 视为跨夜）。 */
     quietHours: { start: string; end: string };
     /** 提示音档位（soft 柔和"叮" / crisp 清脆"当"；当前对话用 crisp，其他对话用 soft）。 */

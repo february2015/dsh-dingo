@@ -17,6 +17,8 @@ function build(options: {
   autoComplete?: boolean
   resolveWorkspace?: (sessionId: string, cwd?: string) => Promise<string | undefined>
   resolveSessionTitle?: (sessionId: string) => Promise<string | undefined>
+  resolveSessionOrigin?: (sessionId: string) => boolean | undefined | Promise<boolean | undefined>
+  onEnqueue?: (item: unknown) => void
   now?: () => number
 } = {}) {
   const audio = options.audio ?? new FakeAudio()
@@ -25,6 +27,8 @@ function build(options: {
     config: feedbackConfig(options.config),
     resolveWorkspace: options.resolveWorkspace ?? (async () => undefined),
     resolveSessionTitle: options.resolveSessionTitle ?? (async () => undefined),
+    resolveSessionOrigin: options.resolveSessionOrigin,
+    onEnqueue: options.onEnqueue,
     autoCompleteSpeech: options.autoComplete ?? true,
     now: options.now,
   })
@@ -134,6 +138,148 @@ describe('模板（Step 2）', () => {
       .toBe('【叮叮】需回答')
     expect(formatAnnouncement('task-error', { name: '数据迁移', summary: '磁盘空间不足' }))
       .toBe('【咚】任务失败')
+  })
+})
+
+describe('子代理提醒策略', () => {
+  it('默认静默子代理完成、审批和提问事件，并且不触发 onEnqueue', async () => {
+    const enqueued: unknown[] = []
+    const { engine, audio } = build({ onEnqueue: (item) => enqueued.push(item) })
+    const subagent = { id: 'sub-sess', header: { origin: 'subagent' as const } }
+    engine.handleSessionEvent(subagent, sessionEvent('assistant/message', undefined, { message: { content: '子代理已完成' } }))
+    engine.handleSessionEvent(subagent, sessionEvent('turn/end', { reason: { kind: 'completed' } }))
+    engine.handleSessionEvent(subagent, sessionEvent('approval/asked', { toolName: 'bash' }))
+    await flush()
+    expect(audio.spokenTexts).toHaveLength(0)
+    expect(engine.pendingViews()).toHaveLength(0)
+    expect(enqueued).toHaveLength(0)
+  })
+
+  it('tool/call ask_user 也遵循同一个子代理过滤门', async () => {
+    const enqueued: unknown[] = []
+    const { engine, audio } = build({ onEnqueue: (item) => enqueued.push(item) })
+    const subagent = { id: 'sub-sess', header: { origin: 'subagent' as const } }
+    engine.handleSessionEvent(subagent, sessionEvent('tool/call', { name: 'ask_user' }))
+    await flush()
+    expect(audio.spokenTexts).toHaveLength(0)
+    expect(enqueued).toHaveLength(0)
+  })
+
+  it('子代理只在显式允许时放行需回答和失败，普通完成仍静默', async () => {
+    const enqueued: any[] = []
+    const { engine, audio } = build({
+      config: { allowSubagentNeedConfirm: true, allowSubagentTaskError: true },
+      onEnqueue: (item) => enqueued.push(item),
+    })
+    const subagent = { id: 'sub-sess', header: { origin: 'subagent' as const } }
+    engine.handleSessionEvent(subagent, sessionEvent('assistant/message', undefined, { message: { content: '子代理完成' } }))
+    engine.handleSessionEvent(subagent, sessionEvent('turn/end', { reason: { kind: 'completed' } }))
+    engine.handleSessionEvent(subagent, sessionEvent('approval/asked', { toolName: 'bash' }))
+    await engine.handleJobSettled({ id: 'job-1', status: 'failed', label: '子任务', detail: '失败' }, { id: 'sub-sess', session: { header: { origin: 'subagent' as const } } })
+    await engine.handleJobSettled({ id: 'job-2', status: 'completed', label: '仍静默' }, { id: 'sub-sess', session: { header: { origin: 'subagent' as const } } })
+    await engine.handleQuestionAsked({ agent: { id: 'sub-sess', session: { header: { origin: 'subagent' as const } } }, questions: [{ text: '已允许的问题' }] })
+    await flush()
+    expect(audio.spokenTexts).toHaveLength(3)
+    expect(audio.tones).toEqual(['ding-ding', 'dong', 'ding-ding'])
+    expect(enqueued).toHaveLength(3)
+    expect(enqueued.map((item) => item.category)).toEqual(['need-confirm', 'task-error', 'need-confirm'])
+  })
+
+  it('保留主会话提醒，parentSession 本身不触发抑制', async () => {
+    const { engine, audio } = build()
+    engine.handleSessionEvent({ id: 'parent-sess', header: { parentSession: 'root-sess' } }, sessionEvent('turn/end', { reason: { kind: 'completed' } }))
+    await flush()
+    expect(audio.spokenTexts).toHaveLength(1)
+  })
+
+  it('显式非 subagent origin 仍按主会话处理', async () => {
+    const { engine, audio } = build()
+    await engine.announce('task-done', { sessionId: 'top-sess', sessionHeader: { origin: 'top-level' }, summary: '顶层完成' })
+    await flush()
+    expect(audio.spokenTexts).toHaveLength(1)
+  })
+
+  it('开启旧兼容开关后提醒子代理完成、后台任务和问题', async () => {
+    const { engine, audio } = build()
+    const agent = { id: 'sub-sess', session: { header: { origin: 'subagent' as const } } }
+    engine.setAnnounceSubagentSessions(true)
+    engine.handleSessionEvent(agent.session, sessionEvent('assistant/message', undefined, { message: { content: '子代理已完成' } }))
+    engine.handleSessionEvent(agent.session, sessionEvent('turn/end', { reason: { kind: 'completed' } }))
+    await engine.handleJobSettled({ id: 'job-1', status: 'completed', label: '子任务' }, agent)
+    await engine.handleQuestionAsked({ agent, questions: [{ text: '子代理问题' }] })
+    await flush()
+    expect(audio.spokenTexts).toHaveLength(3)
+    engine.setAnnounceSubagentSessions(false)
+    expect(engine.snapshot().suppressSubagentNotifications).toBe(true)
+  })
+
+  it('手动 announce 也遵循统一过滤门，且 parentSession-only 不会静默', async () => {
+    const enqueued: unknown[] = []
+    const { engine, audio } = build({ onEnqueue: (item) => enqueued.push(item) })
+    await engine.announce('task-done', { sessionId: 'sub-sess', sessionHeader: { origin: 'subagent' }, summary: '子代理完成' })
+    await engine.announce('need-confirm', { sessionId: 'sub-sess', sessionHeader: { origin: 'subagent' }, summary: '子代理问题' })
+    await engine.announce('task-error', { sessionId: 'sub-sess', sessionHeader: { origin: 'subagent' }, summary: '子代理失败' })
+    await engine.announce('normal', { sessionId: 'sub-sess', sessionHeader: { origin: 'subagent' }, summary: '普通提示' })
+    await engine.announce('need-confirm', { sessionId: 'parent-sess', sessionHeader: { parentSession: 'root-sess' }, summary: '主会话问题' })
+    await flush()
+    expect(audio.spokenTexts).toHaveLength(1)
+    expect(enqueued).toHaveLength(1)
+    expect((enqueued[0] as { category: string }).category).toBe('need-confirm')
+
+    const explicitTop = build()
+    await explicitTop.engine.announce('task-done', { sessionId: 'top-sess', sessionHeader: { origin: 'top-level' }, summary: '顶层完成' })
+    await flush()
+    expect(explicitTop.audio.spokenTexts).toHaveLength(1)
+  })
+
+  it('兼容开关可覆盖默认抑制，现代 false 也可直接放行', async () => {
+    const legacy = build({ config: { announceSubagentSessions: true } })
+    await legacy.engine.announce('task-done', { sessionId: 'sub-sess', sessionHeader: { origin: 'subagent' }, summary: '旧版开启' })
+    await flush()
+    expect(legacy.audio.spokenTexts).toHaveLength(1)
+    expect(legacy.engine.snapshot().announceSubagentSessions).toBe(true)
+    expect(legacy.engine.snapshot().suppressSubagentNotifications).toBe(false)
+    legacy.engine.setAnnounceSubagentSessions(false)
+    expect(legacy.engine.snapshot().announceSubagentSessions).toBe(false)
+    expect(legacy.engine.snapshot().suppressSubagentNotifications).toBe(true)
+    const announced = build({ config: { suppressSubagentNotifications: false, announceSubagentSessions: false } })
+    await announced.engine.announce('task-done', { sessionId: 'sub-sess', sessionHeader: { origin: 'subagent' }, summary: '现代开启' })
+    await flush()
+    expect(announced.audio.spokenTexts).toHaveLength(1)
+  })
+
+  it('resolver 失败时 fail-open；questions resolver 仍可放行显式例外', async () => {
+    const failed = build({ resolveSessionOrigin: () => { throw new Error('lookup failed') } })
+    await failed.engine.handleJobSettled({ id: 'job-1', status: 'completed', label: '未知任务' }, { id: 'unknown' })
+    await flush()
+    expect(failed.audio.spokenTexts).toHaveLength(1)
+    const question = build({ resolveSessionOrigin: () => true, config: { allowSubagentNeedConfirm: true } })
+    await question.engine.handleQuestionAsked({ sessionId: 'sub-sess', questions: [{ text: '问题' }] })
+    await flush()
+    expect(question.audio.spokenTexts).toHaveLength(1)
+    const parentJob = build()
+    await parentJob.engine.handleJobSettled({ id: 'job-2', status: 'completed', label: '主任务' }, { id: 'parent-sess', session: { header: { parentSession: 'root-sess' } } })
+    await flush()
+    expect(parentJob.audio.spokenTexts).toHaveLength(1)
+  })
+
+  it('未知来源 fail-open，resolver 可识别没有 event header 的子代理', async () => {
+    const { engine, audio } = build({ resolveSessionOrigin: (id) => id === 'sub-sess' })
+    await engine.handleJobSettled({ id: 'job-1', status: 'completed', label: '子任务' }, { id: 'sub-sess' })
+    await flush()
+    expect(audio.spokenTexts).toHaveLength(0)
+    const resolverErrorQuestion = build({ resolveSessionOrigin: () => { throw new Error('question lookup failed') } })
+    await resolverErrorQuestion.engine.handleQuestionAsked({ sessionId: 'unknown-question-error', questions: [{ text: '未知问题' }] })
+    await flush()
+    expect(resolverErrorQuestion.audio.spokenTexts).toHaveLength(1)
+    const unknownQuestion = build({ resolveSessionOrigin: () => undefined })
+    await unknownQuestion.engine.handleQuestionAsked({ sessionId: 'unknown-question', questions: [{ text: '未知来源问题' }] })
+    await flush()
+    expect(unknownQuestion.audio.spokenTexts).toHaveLength(1)
+    const top = build({ resolveSessionOrigin: () => undefined })
+    top.engine.handleSessionEvent({ id: 'unknown-sess' }, sessionEvent('turn/end', { reason: { kind: 'completed' } }))
+    await flush()
+    expect(top.audio.spokenTexts).toHaveLength(1)
   })
 })
 
