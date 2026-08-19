@@ -58,7 +58,7 @@ async function dingoCommand(invocation: CommandInvocation, deps: DingoCommandDep
     if (raw.endsWith(' on') || raw.endsWith(' off')) {
       deps.runtime.setAnnounceSubagentSessions(raw.endsWith(' on'));
     }
-    const enabled = deps.runtime.announceSubagentSessions();
+    const enabled = !deps.runtime.feedback().suppressSubagentNotifications;
     const tip = enabled ? '子代理提醒已开启。' : '子代理提醒已关闭：子代理完成、提问和失败不会弹出提醒。';
     return { kind: 'success', text: `dsh-dingo subagents: ${enabled ? 'on' : 'off'}. ${tip}` };
   }
@@ -71,7 +71,7 @@ function statusText(deps: DingoCommandDeps): string {
   const pending = feedback.queue.filter((item) => item.state === 'pending' || item.state === 'deferred').length;
   const speaking = feedback.queue.find((item) => item.state === 'speaking');
   return [
-    `dsh-dingo: ${deps.runtime.enabled() ? 'on' : 'off'} · dnd: ${deps.runtime.dnd() ? 'on' : 'off'} · subagents: ${deps.runtime.announceSubagentSessions() ? 'on' : 'off'}`,
+    `dsh-dingo: ${deps.runtime.enabled() ? 'on' : 'off'} · dnd: ${deps.runtime.dnd() ? 'on' : 'off'} · subagents: ${feedback.suppressSubagentNotifications ? 'suppressed' : 'announced'}`,
     `feedback: enabled · queue ${pending} pending · ${speaking ? `speaking「${speaking.text}」` : 'idle'}`,
     `  quietNow: ${feedback.quietNow ? 'yes' : 'no'} · dedupeWindow: ${feedback.dedupeWindowMs}ms`,
     'Use /dingo on|off to enable/disable reminders.',

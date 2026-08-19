@@ -46,6 +46,9 @@ export interface FeedbackSnapshotView {
   enabled: boolean
   dnd: boolean
   confirmNeverSilent: boolean
+  suppressSubagentNotifications: boolean
+  allowSubagentNeedConfirm: boolean
+  allowSubagentTaskError: boolean
   announceSubagentSessions: boolean
   quietNow: boolean
   activeSessionId?: string

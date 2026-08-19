@@ -42,7 +42,11 @@ export const Config = z.object({
     // 当前对话自身事件默认不由插播队列处理（当前对话回复走"当/当当"提示音，
     // 由 apply 内的 current-reply 订阅直接入队 own 提醒）
     announceOwnSessions: z.boolean().default(false),
-    // 子代理会话默认静默；开启后子代理完成/提问/失败也会提醒
+    // 子代理通知默认静默；需回答/失败可单独配置例外
+    suppressSubagentNotifications: z.boolean().default(true),
+    allowSubagentNeedConfirm: z.boolean().default(false),
+    allowSubagentTaskError: z.boolean().default(false),
+    // 旧配置兼容：true 等价于 suppressSubagentNotifications=false
     announceSubagentSessions: z.boolean().default(false),
     // 静音时段（"HH:mm"；空串 = 无）→ 任务类只入队不发声，结束后补播
     quietHours: z.object({ start: z.string().default(''), end: z.string().default('') }).default({ start: '', end: '' }),
@@ -68,6 +72,9 @@ export function apply(ctx: Context, config: unknown): void {
       confirmNeverSilent: boolean;
       dedupeWindowMs: number;
       announceOwnSessions: boolean;
+      suppressSubagentNotifications: boolean;
+      allowSubagentNeedConfirm: boolean;
+      allowSubagentTaskError: boolean;
       announceSubagentSessions: boolean;
       quietHours: { start: string; end: string };
       toneStyle: 'soft' | 'crisp';
