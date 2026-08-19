@@ -137,6 +137,63 @@ describe('模板（Step 2）', () => {
   })
 })
 
+describe('子代理提醒开关', () => {
+  it('默认静默子代理完成、审批和提问事件', async () => {
+    const { engine, audio } = build()
+    const subagent = { id: 'sub-sess', header: { origin: 'subagent' as const } }
+    engine.handleSessionEvent(subagent, sessionEvent('assistant/message', undefined, { message: { content: '子代理已完成' } }))
+    engine.handleSessionEvent(subagent, sessionEvent('turn/end', { reason: { kind: 'completed' } }))
+    engine.handleSessionEvent(subagent, sessionEvent('approval/asked', { toolName: 'bash' }))
+    await flush()
+    expect(audio.spokenTexts).toHaveLength(0)
+    expect(engine.pendingViews()).toHaveLength(0)
+  })
+
+  it('开启后提醒子代理完成事件，关闭后再次静默', async () => {
+    const { engine, audio } = build()
+    const subagent = { id: 'sub-sess', header: { origin: 'subagent' as const } }
+    engine.setAnnounceSubagentSessions(true)
+    engine.handleSessionEvent(subagent, sessionEvent('assistant/message', undefined, { message: { content: '子代理已完成' } }))
+    engine.handleSessionEvent(subagent, sessionEvent('turn/end', { reason: { kind: 'completed' } }))
+    await flush()
+    expect(audio.spokenTexts).toHaveLength(1)
+    engine.setAnnounceSubagentSessions(false)
+    engine.handleSessionEvent(subagent, sessionEvent('assistant/message', undefined, { message: { content: '子代理再次完成' } }))
+    engine.handleSessionEvent(subagent, sessionEvent('turn/end', { reason: { kind: 'completed' } }))
+    await flush()
+    expect(audio.spokenTexts).toHaveLength(1)
+  })
+
+  it('保留主会话提醒', async () => {
+    const { engine, audio } = build()
+    engine.handleSessionEvent({ id: 'parent-sess' }, sessionEvent('turn/end', { reason: { kind: 'completed' } }))
+    await flush()
+    expect(audio.spokenTexts).toHaveLength(1)
+  })
+
+  it('默认静默子代理后台任务完成/失败和用户提问', async () => {
+    const { engine, audio } = build()
+    const agent = { id: 'sub-sess', session: { header: { origin: 'subagent' as const } } }
+    engine.handleJobSettled({ id: 'job-1', status: 'completed', label: '子任务' }, agent)
+    engine.handleJobSettled({ id: 'job-2', status: 'failed', label: '子任务', detail: '失败' }, agent)
+    engine.handleQuestionAsked({ agent, questions: [{ text: '子代理问题' }] })
+    await flush()
+    expect(audio.spokenTexts).toHaveLength(0)
+  })
+
+  it('开启后子代理后台任务和用户提问也会提醒', async () => {
+    const { engine, audio } = build()
+    const agent = { id: 'sub-sess', session: { header: { origin: 'subagent' as const } } }
+    engine.setAnnounceSubagentSessions(true)
+    engine.handleJobSettled({ id: 'job-1', status: 'completed', label: '子任务' }, agent)
+    await flush()
+    expect(audio.spokenTexts).toHaveLength(1)
+    engine.handleQuestionAsked({ agent, questions: [{ text: '子代理问题' }] })
+    await flush()
+    expect(audio.spokenTexts).toHaveLength(2)
+  })
+})
+
 describe('DND 与去重', () => {
   it('DND：任务完成类静音（deferred），需回答仍播', async () => {
     const { engine, audio } = build({ config: { dnd: true } })

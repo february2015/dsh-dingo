@@ -82,6 +82,7 @@ profile 的 `cordis.patch.yml` 或插件配置里可覆盖：
       toneStyle: soft        # 提示音档位：soft（其他对话"叮"）/ crisp（当前对话"当"）
       dnd: false
       dedupeWindowMs: 10000  # 同会话同内容去重窗口（同样提示不重复、不同样各自响）
+      announceSubagentSessions: false  # 是否提醒子代理完成/提问/失败（默认关闭）
       quietHours: { start: '', end: '' }
     # systemNotify: true       # 其他对话的系统级通知（默认开）
     # systemNotifyBaseUrl: ''  # 深链基地址（默认 http://127.0.0.1:3080）
@@ -92,13 +93,15 @@ profile 的 `cordis.patch.yml` 或插件配置里可覆盖：
 ```
 /dingo on|off        # 开/关提醒
 /dingo status        # 开关、DND、插播队列
-/dingo dnd [on|off]  # 免打扰（任务完成类静音、需回答仍提醒）
+/dingo dnd [on|off]         # 免打扰（任务完成类静音、需回答仍提醒）
+/dingo subagents [on|off]  # 开关子代理完成/提问/失败提醒（默认关闭）
 ```
 
 ## 技术实现（架构）
 
 - **host 半**（`src/index.ts` + `src/feedback.ts`）：
   - 订阅 `session/event`：`turn/end(completed)` / `approval/asked` / `tool/call(ask_user)` / `assistant/message` → 判定级别 → 入提醒队列（优先级：需回答 > 有回复 > 失败）；
+  - 子代理会话通过持久化 `SessionHeader.origin === 'subagent'` 识别；默认静默其完成/审批/提问/后台任务提醒，可在 `feedback.announceSubagentSessions` 中开启，或使用 `/dingo subagents on`；
   - 当前对话回复（客户端上报的当前查看会话）→ 直接入队 own 提醒（只播提示音、不显示卡片）；
   - 队列按优先级串行播报，客户端 `spoken` 上报后播下一条；
 - **client 半**（`src/client/FeedbackCard.tsx` + `tones.ts`）：

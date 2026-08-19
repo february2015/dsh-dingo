@@ -45,6 +45,7 @@ export function feedbackConfig(overrides: Partial<FeedbackConfig> = {}): Feedbac
     confirmNeverSilent: true,
     dedupeWindowMs: 10_000,
     announceOwnSessions: false,
+    announceSubagentSessions: false,
     quietHours: { start: '', end: '' },
     toneStyle: 'soft',
     ...overrides,

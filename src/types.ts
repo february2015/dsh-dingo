@@ -25,6 +25,8 @@ export interface Config {
     dedupeWindowMs: number;
     /** 同会话自身事件是否也插播（默认 false = 当前对话自身事件由"当/当当"提示音处理）。 */
     announceOwnSessions: boolean;
+    /** 是否提醒子代理会话（默认 false = 子代理完成/提问/失败均静默）。 */
+    announceSubagentSessions: boolean;
     /** 静音时段（"HH:mm" 24h；空串 = 无；start>end 视为跨夜）。 */
     quietHours: { start: string; end: string };
     /** 提示音档位（soft 柔和"叮" / crisp 清脆"当"；当前对话用 crisp，其他对话用 soft）。 */

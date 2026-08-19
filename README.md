@@ -82,6 +82,7 @@ Overridable in the profile's `cordis.patch.yml` or plugin config:
       toneStyle: soft        # tone set: soft (other conversations "ding") / crisp (current conversation "dang")
       dnd: false
       dedupeWindowMs: 10000  # same-conversation same-content dedup window (same reminder won't repeat, different ones ring)
+      announceSubagentSessions: false  # notify when subagent sessions complete/ask/fail (default off)
       quietHours: { start: '', end: '' }
     # systemNotify: true       # system notifications for other conversations (default on)
     # systemNotifyBaseUrl: ''  # deep-link base URL (default http://127.0.0.1:3080)
@@ -92,13 +93,15 @@ Overridable in the profile's `cordis.patch.yml` or plugin config:
 ```
 /dingo on|off        # enable/disable reminders
 /dingo status        # enabled/DND/queue status
-/dingo dnd [on|off]  # do-not-disturb (task-completion silent, needs-answer still alerts)
+/dingo dnd [on|off]          # do-not-disturb (task-completion silent, needs-answer still alerts)
+/dingo subagents [on|off]   # enable/disable subagent completion prompts (default off)
 ```
 
 ## Architecture
 
 - **host half** (`src/index.ts` + `src/feedback.ts`):
   - Subscribes to `session/event`: `turn/end(completed)` / `approval/asked` / `tool/call(ask_user)` / `assistant/message` → classifies → enqueues (priority: needs-answer > reply > failure);
+  - Subagent sessions are identified by durable `SessionHeader.origin === 'subagent'`; their completion/approval/question/job reminders are suppressed by default and can be enabled with `feedback.announceSubagentSessions` or `/dingo subagents on`;
   - Current-conversation replies (from the client's reported active session) → own reminder (tone only, no card);
   - Queue plays serially by priority; the client reports `spoken` before the next item plays;
 - **client half** (`src/client/FeedbackCard.tsx` + `tones.ts`):

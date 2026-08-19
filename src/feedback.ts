@@ -134,6 +134,8 @@ export interface FeedbackSnapshot {
   readonly dnd: boolean;
   readonly confirmNeverSilent: boolean;
   readonly dedupeWindowMs: number;
+  /** 是否提醒子代理会话（默认 false：子代理通知静默）。 */
+  readonly announceSubagentSessions: boolean;
   /** 当前是否处于静音时段（quietHours）。 */
   readonly quietNow: boolean;
   /** 当前「正在听」的会话 id（客户端上报；缺省 = 未知）。 */
@@ -159,6 +161,8 @@ export interface FeedbackConfig {
   readonly dedupeWindowMs: number;
   /** 同会话自身事件是否也插播（FR-6.3，默认 false = 不插播）。 */
   readonly announceOwnSessions?: boolean;
+  /** 是否提醒子代理会话（默认 false = 子代理完成/提问/失败均静默）。 */
+  announceSubagentSessions?: boolean;
   /** 静音时段（"HH:mm" 24h；空串 = 无；start>end 视为跨夜）。 */
   readonly quietHours?: { readonly start: string; readonly end: string };
   /** T-8 音效打磨：提示音档位（soft 柔和默认 / crisp 清脆）。 */
@@ -279,6 +283,8 @@ export class FeedbackEngine {
   private interruptSeq = 0;
   /** 会话标题缓存（session/title 事件）。 */
   private readonly sessionTitles = new Map<string, string>();
+  /** 会话是否为子代理（用于 jobs/questions 等非 session/event 来源）。 */
+  private readonly sessionOrigins = new Map<string, boolean>();
   /** 会话最近 assistant 文本（turn/end 时取摘要源）。 */
   private readonly assistantText = new Map<string, string>();
   /** 工作区标题缓存（sessionId → workspaceTitle）。 */
@@ -314,6 +320,7 @@ export class FeedbackEngine {
       dnd: cfg.dnd,
       confirmNeverSilent: cfg.confirmNeverSilent,
       dedupeWindowMs: cfg.dedupeWindowMs,
+      announceSubagentSessions: cfg.announceSubagentSessions === true,
       quietNow: isQuietNow(cfg.quietHours, this.now()),
       activeSessionId: this.activeSessionId,
       queue: this.queue.map((item) => toView(item)),
@@ -334,9 +341,10 @@ export class FeedbackEngine {
    * `session/event` 处理器（FR-6.1：turn/end + assistant/message → task-done；
    * approval/asked → need-confirm；session/title 记标题缓存）。
    */
-  handleSessionEvent(session: { id: string; header?: { cwd?: string } }, event: SessionEventLike): void {
+  handleSessionEvent(session: SessionLike, event: SessionEventLike): void {
     if (!this.deps.config.enabled) return;
     const sessionId = String(session.id);
+    this.rememberSessionOrigin(sessionId, session.header);
     switch (event.type) {
       case 'session/title': {
         const title = (event as SessionEventLike & { data?: { title?: string } }).data?.title;
@@ -358,6 +366,7 @@ export class FeedbackEngine {
       case 'turn/end': {
         const reason = (event as SessionEventLike & { data?: { reason?: { kind?: string } } }).data?.reason;
         if (reason?.kind !== 'completed') return; // aborted/error/max-tokens 不算完成
+        if (!this.shouldAnnounceSession(sessionId)) return;
         // 当前对话的 turn/end 同样提醒（own 项：只播当/当当提示音、不显示卡片）。
         // 过程中间回复（assistant/message）不提醒——只有 turn/end（最终回复）
         // 或提问（approval/ask_user/questions）才算"需要你注意"。
@@ -371,6 +380,7 @@ export class FeedbackEngine {
         return;
       }
       case 'approval/asked': {
+        if (!this.shouldAnnounceSession(sessionId)) return;
         const data = (event as SessionEventLike & { data?: { toolName?: string; reason?: string } }).data;
         // 需回答类：当前对话也提醒（用户要看对话里的审批请求；broadcast 只处理文本回复）
         const summary = data?.toolName ? `${data.toolName}${data.reason ? `：${data.reason}` : ''}` : (data?.reason ?? '工具调用');
@@ -378,6 +388,7 @@ export class FeedbackEngine {
         return;
       }
       case 'tool/call': {
+        if (!this.shouldAnnounceSession(sessionId)) return;
         // dsh-tool-ask-user / ask_user 工具：向用户提问 → 需回答提醒（当前对话也提醒）
         const tool = String((event as SessionEventLike & { data?: { name?: string } }).data?.name ?? '').toLowerCase();
         if (/ask[_-]?user/.test(tool)) {
@@ -391,9 +402,10 @@ export class FeedbackEngine {
   }
 
   /** jobs 域 settled 处理器（FR-6.1：completed → task-done；failed → task-error）。 */
-  handleJobSettled(snapshot: JobSnapshotLike): void {
+  handleJobSettled(snapshot: JobSnapshotLike, owner?: AgentLike): void {
     if (!this.deps.config.enabled) return;
-    const sessionId = typeof snapshot.ownerSession === 'string' ? snapshot.ownerSession : undefined;
+    const sessionId = typeof snapshot.ownerSession === 'string' ? snapshot.ownerSession : owner?.id;
+    if (!this.deps.config.announceSubagentSessions && this.isSubagentSession(sessionId, owner?.session?.header)) return;
     if (sessionId !== undefined && this.isOwnSession(sessionId)) return;
     const label = snapshot.label ?? snapshot.detail ?? '后台任务';
     if (snapshot.status === 'completed') {
@@ -405,9 +417,14 @@ export class FeedbackEngine {
   }
 
   /** questions 域 ask() 处理器（need-confirm，最高优先级；当前对话也提醒）。 */
-  handleQuestionAsked(input: { sessionId?: string; questions: readonly { text?: string; title?: string }[] }): void {
+  handleQuestionAsked(input: {
+    sessionId?: string;
+    agent?: AgentLike;
+    questions: readonly { text?: string; title?: string }[];
+  }): void {
     if (!this.deps.config.enabled) return;
-    const sessionId = input.sessionId;
+    const sessionId = input.sessionId ?? input.agent?.id;
+    if (!this.deps.config.announceSubagentSessions && this.isSubagentSession(sessionId, input.agent?.session?.header)) return;
     const first = input.questions[0];
     const summary = first?.text?.trim() || first?.title?.trim() || '有新问题需要你回答';
     void this.announceNeedConfirm(sessionId, summary, 'questions');
@@ -449,6 +466,12 @@ export class FeedbackEngine {
   /** 客户端上报「正在听的会话」（别会话判定用）。 */
   setActiveSession(sessionId: string | undefined): void {
     this.activeSessionId = sessionId === '' ? undefined : sessionId;
+  }
+
+  /** 设置是否提醒子代理会话（运行时开关）。 */
+  setAnnounceSubagentSessions(value: boolean): boolean {
+    this.deps.config.announceSubagentSessions = value;
+    return value;
   }
 
   /** `/dingo dnd on|off`：切换免打扰（任务类静音、确认类仍播）。 */
@@ -810,6 +833,22 @@ export class FeedbackEngine {
     return this.activeSessionId !== undefined && this.activeSessionId === sessionId;
   }
 
+  private rememberSessionOrigin(sessionId: string, header?: SessionHeaderLike): void {
+    if (header?.origin !== undefined) this.sessionOrigins.set(sessionId, header.origin === 'subagent');
+  }
+
+  private isSubagentSession(sessionId: string | undefined, header?: SessionHeaderLike): boolean {
+    if (header?.origin !== undefined) {
+      if (sessionId !== undefined) this.sessionOrigins.set(sessionId, header.origin === 'subagent');
+      return header.origin === 'subagent';
+    }
+    return sessionId !== undefined && this.sessionOrigins.get(sessionId) === true;
+  }
+
+  private shouldAnnounceSession(sessionId: string): boolean {
+    return this.deps.config.announceSubagentSessions === true || !this.isSubagentSession(sessionId);
+  }
+
   private async resolveWorkspaceTitle(sessionId: string | undefined, cwd?: string): Promise<string | undefined> {
     if (sessionId === undefined) return undefined;
     const cached = this.workspaceCache.get(sessionId);
@@ -876,8 +915,8 @@ export interface TonePlayer {
  *
  * - `session/event`：别会话 `turn/end`(completed) + `assistant/message` →
  *   task-done；`approval/asked` → need-confirm；`session/title` → 标题缓存；
- * - `ctx.jobs.onJobDone`：jobs 域 settled → task-done / task-error（守卫缺失）；
- * - `ctx.userQuestions.ask` 包装：questions 域 ask() → need-confirm（守卫缺失）。
+ * - `ctx.jobs.onJobDone`：jobs 域 settled → task-done / task-error（子代理按开关过滤）；
+ * - `ctx.userQuestions.ask` 包装：questions 域 ask() → need-confirm（子代理按开关过滤）。
  *
  * 工作区标题解析：默认经 `ctx.apiProxy.workspace.list()` 懒缓存（loopback 权威，
  * 参照 T-3 session-ctrl 的网关姿势）；`deps.resolveWorkspace` 可覆盖（测试注入）。
@@ -915,9 +954,11 @@ export function installFeedback(
   'dsh-dingo: feedback session/event');
 
   // 2) jobs 域 settled（守卫缺失：无 ctx.jobs 的宿主不接 jobs 源）
-  const jobs = ctx.get('jobs') as { onJobDone?: (listener: (snapshot: JobSnapshotLike) => void) => () => void } | undefined;
+  const jobs = ctx.get('jobs') as {
+    onJobDone?: (listener: (snapshot: JobSnapshotLike, owner?: AgentLike) => void) => () => void;
+  } | undefined;
   if (jobs?.onJobDone) {
-    ctx.effect(() => jobs.onJobDone!((snapshot) => engine.handleJobSettled(snapshot)),
+    ctx.effect(() => jobs.onJobDone!((snapshot, owner) => engine.handleJobSettled(snapshot, owner)),
       'dsh-dingo: feedback jobs');
   } else {
     logger('[feedback] ctx.jobs 不可用 — jobs 事件源跳过');
@@ -925,12 +966,12 @@ export function installFeedback(
 
   // 3) questions 域 ask() 包装（守卫缺失；包装随 effect 还原）
   const questions = ctx.get('userQuestions') as unknown as
-    | { ask: (request: { agent?: { id?: string }; questions: readonly { text?: string; title?: string }[] }) => Promise<unknown> }
+    | { ask: (request: { agent?: AgentLike; questions: readonly { text?: string; title?: string }[] }) => Promise<unknown> }
     | undefined;
   if (questions) {
     const originalAsk = questions.ask.bind(questions);
     questions.ask = (request) => {
-      engine.handleQuestionAsked({ sessionId: request.agent?.id, questions: request.questions });
+      engine.handleQuestionAsked({ sessionId: request.agent?.id, agent: request.agent, questions: request.questions });
       return originalAsk(request);
     };
     ctx.effect(() => () => {
@@ -945,7 +986,20 @@ export function installFeedback(
 
 /** 会话/事件的最小形状（与 @deepseek-ai/dsh-session 结构兼容，避免强耦合）。 */
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
-export interface SessionLike { readonly id: string; readonly header?: { readonly cwd?: string } }
+export interface SessionHeaderLike {
+  readonly cwd?: string;
+  readonly origin?: 'subagent';
+}
+
+export interface SessionLike {
+  readonly id: string;
+  readonly header?: SessionHeaderLike;
+}
+
+export interface AgentLike {
+  readonly id?: string;
+  readonly session?: { readonly header?: SessionHeaderLike };
+}
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 type SessionEventLike = { type: string; [key: string]: any };
