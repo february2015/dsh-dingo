@@ -67,7 +67,7 @@
   - `×` removes the card for this round.
   - A `Lock` toggle sits at the panel's top right.
 - **Close rhythm** (while unlocked):
-  - leaving the bar/panel closes it after ~0.5s;
+  - leaving the bar/panel closes it after ~2s;
   - 5s without any activity (no pointer movement, no click) closes it;
   - **clicking anywhere outside closes it immediately** — clicking the account/settings button is no longer blocked by the panel;
   - opening a card closes it after jumping.

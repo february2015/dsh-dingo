@@ -42,7 +42,7 @@ const SYNTHETIC_DISMISS_SUPPRESS_MS = 5 * 60_000
 const PANEL_IDLE_CLOSE_MS = 5_000
 
 /** 鼠标离开（胶囊与面板都出去了）后延迟关闭（ms）：给"移回面板"留一点时间。 */
-const PANEL_LEAVE_CLOSE_MS = 500
+const PANEL_LEAVE_CLOSE_MS = 2_000
 
 /** 2.0 会话卡片状态。 */
 export type SessionCardStatus = 'running' | 'answered' | 'question' | 'error' | 'normal'
@@ -386,7 +386,7 @@ export function SessionCardRailCompact({ rpc, openSession: openTarget, useSessio
    * 鼠标一进入胶囊就展开，没有延迟。
    *
    * 以前是"停留 700ms 才弹"，会让人觉得悬停没反应；现在弹出即时，收起交给三条
-   * 明确节奏：移开约 0.5s、空闲 5s、点面板外立刻收；锁定时都不收。误触弹出也不怕——
+   * 明确节奏：移开约 2s、空闲 5s、点面板外立刻收；锁定时都不收。误触弹出也不怕——
    * 点别处（比如账号/设置）就没了。
    */
   const scheduleHoverOpen = (): void => {
@@ -399,7 +399,7 @@ export function SessionCardRailCompact({ rpc, openSession: openTarget, useSessio
    * 鼠标离开后稍等再收起。
    *
    * 之前是"离开完全不收"，面板就一直挂在 footer 上方，把「设置 / 账号」
-   * 那一排挡住点不到。现在移开 ~0.5s 就收；移到面板上则取消这次收起；锁定时不收。
+   * 那一排挡住点不到。现在移开 ~2s 就收（给手滑留缓冲）；移到面板上则取消这次收起；锁定时不收。
    */
   const scheduleLeaveClose = (): void => {
     if (panelLocked) return
