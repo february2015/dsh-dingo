@@ -1078,10 +1078,17 @@ const styles: Record<string, React.CSSProperties> = {
     lineHeight: 1,
     cursor: 'pointer',
   },
+  /**
+   * 已锁定：橙色小按钮。
+   *
+   * 不用蓝色——蓝在本插件里是"执行中"，会误读；橙色是"钉住了 / 需要留意"的语义，
+   * 和状态色板里的疑问橙同源（#f59e0b），一眼能看出面板不会自己走。
+   */
   lockOn: {
-    borderColor: '#60a5fa',
-    background: 'rgba(96,165,250,0.16)',
-    color: '#93c5fd',
+    borderColor: '#f59e0b',
+    background: 'rgba(245,158,11,0.18)',
+    color: '#fbbf24',
+    fontWeight: 600,
   },
   dot: {
     display: 'inline-block',
