@@ -254,6 +254,10 @@ const MAX_REPLAY_COUNT = 2;
 const HISTORY_CAP = 8;
 /** 2.0：正常（已看过）卡片在完成超过该时长后自动隐藏。 */
 const CARD_HIDE_AFTER_SEEN_MS = 60 * 60 * 1000;
+/** 跨工作区 seed 卡的「待阅读」保留时长：超过就不再替别的窗口长期记着。 */
+const SEEDED_ANSWERED_TTL_MS = 6 * 60 * 60 * 1000;
+/** 用户 × 掉的 seed 卡抑制时长：期间 seed 不再把它加回来。 */
+const SEEDED_DISMISS_TTL_MS = 30 * 60 * 1000;
 // ─────────────────────────── 播报模板 ───────────────────────────
 
 /**
@@ -342,6 +346,10 @@ export class FeedbackEngine {
   private readonly history: AnnouncementView[] = [];
   /** 2.0 会话卡片映射：sessionId → 卡片状态（1:1）。 */
   private readonly cards = new Map<string, SessionCardState>();
+  /** 由跨工作区 seed 创建的卡片（不是事件流建的），用于过时清理。 */
+  private readonly seededCards = new Set<string>();
+  /** 用户 × 掉的 seed 卡：sessionId → 关闭时间（抑制期内不再补回）。 */
+  private readonly dismissedSeeds = new Map<string, number>();
   /** 正在播报的项。 */
   private active: Announcement | null = null;
   /** tick 是否正在执行（串行闸）。 */
@@ -416,18 +424,27 @@ export class FeedbackEngine {
 
   /**
    * 跨工作区种子（DSH 0.2+）：把宿主 `sessionController.list()` 里「引擎还没见过」
-   * 的会话补进卡片。别的项目在跑的会话事件本来也会经全局 `session/event` 进来，
-   * 但「你切走之后才起/才结束」的那些不会，这里补上。
+   * 的会话补进卡片。
+   *
+   * 宿主事件本身是全进程的，所以这一层补的是**事件流覆盖不到的那部分**：
+   * 插件加载 / DSH 重启前就已开始或刚结束、不会再有新事件的会话。
    *
    * 只补有意义的：running 一律补；刚结束 10 分钟内的记成「待阅读」；
    * 其余留给事件驱动。上限 {@link EXTERNAL_CARD_CAP} 张。
+   *
+   * 同时做两件清理，避免"永久绿点"和"× 关不掉"：
+   * - seed 出来的卡在宿主清单里消失（归档/删除）或已回答超过
+   *   {@link SEEDED_ANSWERED_TTL_MS} → 移除；
+   * - 用户 × 掉的 seed 卡在 {@link SEEDED_DISMISS_TTL_MS} 内不再补回。
    * @param items - 宿主会话摘要列表。
    */
   seedExternalSessions(items: readonly ExternalSessionSummary[]): void {
     const now = this.now();
     const answeredCutoff = now - 10 * 60_000;
+    const present = new Set<string>();
     for (const item of items) {
       if (!item || typeof item.sessionId !== 'string' || item.sessionId === '') continue;
+      present.add(item.sessionId);
       // 标题先记下来（不建卡也要记：当前会话就是被跳过的那个）
       const projected = item.projectedTitle ?? item.sessionTitle;
       if (projected !== undefined && projected !== '') this.listTitles.set(item.sessionId, projected);
@@ -442,9 +459,16 @@ export class FeedbackEngine {
         }
         continue;
       }
+      // 用户刚 × 掉：下一个活动周期之前不再补回（否则看起来"关闭不好使"）。
+      const dismissedAt = this.dismissedSeeds.get(item.sessionId);
+      if (dismissedAt !== undefined) {
+        if (now - dismissedAt < SEEDED_DISMISS_TTL_MS) continue;
+        this.dismissedSeeds.delete(item.sessionId);
+      }
       if (!item.running && (typeof item.updatedAt !== 'number' || item.updatedAt < answeredCutoff)) continue;
       if (this.cards.size >= EXTERNAL_CARD_CAP) break;
       const status: SessionCardStatus = item.running ? 'running' : 'answered';
+      this.seededCards.add(item.sessionId);
       this.cards.set(item.sessionId, {
         sessionId: item.sessionId,
         status,
@@ -454,6 +478,26 @@ export class FeedbackEngine {
         updatedAt: now,
         conclusionAt: status === 'answered' ? (item.updatedAt ?? now) : undefined,
       });
+    }
+    // seed 卡的过时清理：宿主清单里没了（归档/删除）→ 移除；
+    // 一直是「待阅读」超过 TTL（跨窗口记着的旧提醒）→ 也移除，别让绿点计数永久挂着。
+    for (const sessionId of [...this.seededCards]) {
+      const card = this.cards.get(sessionId);
+      if (card === undefined) {
+        this.seededCards.delete(sessionId);
+        continue;
+      }
+      const gone = !present.has(sessionId);
+      const stale = card.status === 'answered'
+        && now - (card.conclusionAt ?? card.updatedAt) > SEEDED_ANSWERED_TTL_MS;
+      if (gone || stale) {
+        this.cards.delete(sessionId);
+        this.seededCards.delete(sessionId);
+      }
+    }
+    // dismiss 抑制表本身也要有过期清理，避免长跑进程里无界增长。
+    for (const [sessionId, at] of this.dismissedSeeds) {
+      if (now - at >= SEEDED_DISMISS_TTL_MS) this.dismissedSeeds.delete(sessionId);
     }
   }
 
@@ -519,14 +563,25 @@ export class FeedbackEngine {
   /** 会话销毁/删除 → 移除对应卡片（2.0 生命周期）。 */
   removeSession(sessionId: string): void {
     this.cards.delete(sessionId);
+    this.seededCards.delete(sessionId);
+    this.dismissedSeeds.delete(sessionId);
     this.sessionTitles.delete(sessionId);
     this.assistantText.delete(sessionId);
     this.workspaceCache.delete(sessionId);
   }
 
-  /** × 关闭：仅移除本次卡片，下次状态变化重新出现。 */
+  /**
+   * × 关闭：仅移除本次卡片，下次状态变化重新出现。
+   *
+   * seed 出来的卡要额外记一笔关闭时间——它是 host 每 5 秒从会话清单里"重新发现"
+   * 的，不记的话下一次 seed 就把它加回来了。
+   */
   dismissCard(sessionId: string | undefined): boolean {
     if (sessionId === undefined) return false;
+    if (this.seededCards.has(sessionId)) {
+      this.dismissedSeeds.set(sessionId, this.now());
+      this.seededCards.delete(sessionId);
+    }
     return this.cards.delete(sessionId);
   }
 
@@ -750,10 +805,11 @@ export class FeedbackEngine {
   }
 
   /**
-   * 重查队列并尝试播报（供 RPC status / 定时器 / 测试在 DND 解除、冷却到期后
+   * 重查队列并尝试播报（供 RPC status / 定时器 / 测试在 DND 解除、静音时段结束后
    * 主动驱动；生产由 {@link scheduleRecheck} 定时器兜底）。
    */
   recheck(): void {
+    this.requeueDeferred();
     this.scheduleRecheck();
     void this.tick();
   }
@@ -924,11 +980,19 @@ export class FeedbackEngine {
     for (const item of this.queue) {
       if (item.state === 'pending' && item.replayAt > now) earliest = Math.min(earliest, item.replayAt);
     }
+    // 静音时段结束：deferred 项没有别的事件能唤醒它（DND 有 setDnd 兜着，
+    // quietHours 只会"自然到点"），必须自己定一个闹钟，否则不会"结束后补播"。
+    if (this.queue.some((item) => item.state === 'deferred')) {
+      const quietEnd = quietEndAt(this.deps.config.quietHours, now);
+      if (quietEnd !== undefined) earliest = Math.min(earliest, quietEnd);
+    }
     if (!Number.isFinite(earliest)) return;
     if (this.nextTimer !== undefined) clearTimeout(this.nextTimer);
     const delay = Math.max(earliest - now, 10);
     this.nextTimer = setTimeout(() => {
       this.nextTimer = undefined;
+      this.requeueDeferred();
+      this.scheduleRecheck();
       void this.tick();
     }, delay);
     this.nextTimer.unref?.();
@@ -1019,7 +1083,12 @@ export class FeedbackEngine {
     // 用户正在说话（T-6 置 listening）→ 不插播（等说完再补）
     if (this.deps.audio.state() === 'listening') return;
     const item = this.peekSpeakable();
-    if (!item) return;
+    if (!item) {
+      // 可能刚把项标成 deferred（DND/静音时段）：这里必须补一次唤醒检查，
+      // 否则 quietHours 结束后没有事件能把它叫醒，也就不会"结束后补播"。
+      this.scheduleRecheck();
+      return;
+    }
     this.busy = true;
     const myToken = this.interruptSeq;
     try {
@@ -1081,6 +1150,9 @@ export class FeedbackEngine {
       if (this.active === item) this.active = null;
       this.busy = false;
     }
+    // 本轮可能把项标成了 deferred（DND/静音时段）：补一个唤醒闹钟，
+    // 静音结束后自动补播（没有新事件时也有兜底）。
+    this.scheduleRecheck();
     // 继续下一条（微任务间隙，让 interrupt / 新事件有机会插入）
     void Promise.resolve().then(() => void this.tick());
   }
@@ -1559,11 +1631,45 @@ export function isQuietNow(quiet: FeedbackConfig['quietHours'], now: number | Da
   return start <= end ? current >= start && current < end : current >= start || current < end;
 }
 
-/** 插播播报时长估算（ms）：提示音 + 文本合成播放；上下限夹紧。 */
+/**
+ * 当前静音时段结束的时刻（epoch ms）；不在静音时段 / 时段非法 → undefined。
+ *
+ * 用来给"结束后补播"定闹钟：跨夜时段（start>end）要分清是今天结束还是明天结束。
+ * @param quiet - 静音时段配置。
+ * @param now - 当前时间（epoch ms 或 Date）。
+ * @returns 结束时刻。
+ */
+export function quietEndAt(quiet: FeedbackConfig['quietHours'], now: number | Date): number | undefined {
+  if (!quiet?.start || !quiet?.end) return undefined;
+  if (!isQuietNow(quiet, now)) return undefined;
+  const start = toMinutes(quiet.start);
+  const end = toMinutes(quiet.end);
+  const date = new Date(now);
+  const current = date.getHours() * 60 + date.getMinutes();
+  const endDate = new Date(date);
+  endDate.setHours(Math.floor(end / 60), end % 60, 0, 0);
+  // 跨夜时段只在上半夜（current >= start）结束于明天；下半夜已经过了午夜，今天就结束。
+  if (start > end && current >= start) endDate.setDate(endDate.getDate() + 1);
+  let at = endDate.getTime();
+  // 兜底：夏令时跳变等极端情况下算出的"结束点"可能已经过去，往后推一天，
+  // 避免定时器退化成 10ms 空转。
+  for (let guard = 0; guard < 3 && at <= date.getTime(); guard += 1) at += 86_400_000;
+  return at;
+}
+
+/**
+ * 插播播报时长估算（ms）：提示音 + 文本合成播放；上下限夹紧。
+ *
+ * 下限 4s 不是播放时长，而是**客户端可见窗口**：提示音由客户端轮询
+ * `state === 'speaking'` 的项来播放，轮询间隔 1s，而短提醒（"【叮】有回复"）
+ * 的真实播放时长只有 1.2s —— 窗口太窄时能否听见取决于轮询相位，还会被后台
+ * 标签页的定时器节流放大成"必然听不见"。4s 覆盖 4 个轮询周期。
+ * 上限 30s 防挂起（客户端不上报 spoken 时的兜底）。
+ */
 export function estimateSpeechMs(text: string): number {
   const chars = text.length;
-  // 中文播报 ~150ms/字 + 提示音 ~300ms；下限 800ms 防过短，上限 30s 防挂起
-  return Math.min(Math.max(800, chars * 150 + 300), 30_000);
+  // 中文播报 ~150ms/字 + 提示音 ~300ms
+  return Math.min(Math.max(4000, chars * 150 + 300), 30_000);
 }
 
 /**

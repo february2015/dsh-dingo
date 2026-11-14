@@ -3,12 +3,15 @@
  *
  * 双入口（header 按钮 / agent 自然语言指令）最终都调用这里的 `autoNameSession`：
  * 读取近期用户消息（合并后喂给 LLM）→ 优先用 DeepSeek V4 Flash 生成有区分度的标题，
- * 失败时规则回退 → `session.rename`。
+ * 失败时规则回退 → 写回会话标题。
+ *
+ * 会话读写走 `./session-api.ts` 的适配层（0.2 的 sessionController 优先、
+ * 旧 apiProxy 兜底），不再直接依赖任何单一宿主 API。
  *
  * @module dsh-dingo/auto-name
  */
 import type { Context } from '@deepseek-ai/cordis'
-import { safeService } from './feedback.ts'
+import { readRecentHistory, renameSessionTitle, type HistoryEntryLike } from './session-api.ts'
 
 /** 自动命名结果。 */
 export interface AutoNameResult {
@@ -17,56 +20,31 @@ export interface AutoNameResult {
   error?: string
 }
 
-/** 会话历史/重命名 API 的最小形状（避免强耦合）。 */
-interface SessionsApiLike {
-  history(request: { rpcId: unknown; payload: { sessionId: string; maxMessages?: number } }): Promise<{
-    result: {
-      ok: boolean
-      value?: { events?: readonly HistoryEntryLike[] }
-      error?: { message?: string }
-    }
-  }>
-  rename(request: { rpcId: unknown; payload: { sessionId: string; title: string } }): Promise<{
-    result: {
-      ok: boolean
-      value?: { title: string }
-      error?: { message?: string }
-    }
-  }>
-}
-
-interface HistoryEntryLike {
-  event?: { type?: string; data?: Record<string, unknown>; [key: string]: unknown }
-}
-
 /**
- * 执行自动命名：读取最近消息 → 规则生成标题 → 写入 session.rename。
+ * 执行自动命名：读取最近消息 → 生成标题 → 写回。
  * 返回新标题；失败时保持原名并返回错误信息。
+ * @param ctx - 宿主上下文。
+ * @param sessionId - 目标会话 id。
+ * @returns 结果（失败带 error 文案）。
  */
 export async function autoNameSession(ctx: Context, sessionId: string): Promise<AutoNameResult> {
-  const api = safeService<{ sessions?: SessionsApiLike }>(ctx, 'apiProxy')
-  if (!api?.sessions) {
-    return { ok: false, error: '自动命名不可用：缺少 apiProxy.sessions' }
+  const history = await readRecentHistory(ctx, sessionId, 50)
+  if (!history.ok) {
+    return { ok: false, error: history.error ?? '读取会话历史失败' }
   }
 
-  const rpcId = makeRpcId()
-  const history = await api.sessions.history({ rpcId, payload: { sessionId, maxMessages: 50 } })
-  if (!history.result.ok || !history.result.value) {
-    return { ok: false, error: history.result.error?.message ?? '读取会话历史失败' }
-  }
-
-  const texts = extractRecentUserTexts(history.result.value.events ?? [])
+  const texts = extractRecentUserTexts(history.entries)
   const title = (await generateTitleWithLlm(ctx, texts)) ?? generateTitle(texts)
   if (!title) {
     return { ok: false, error: '未能从对话内容生成有效标题' }
   }
 
-  const renamed = await api.sessions.rename({ rpcId, payload: { sessionId, title } })
-  if (!renamed.result.ok) {
-    return { ok: false, error: renamed.result.error?.message ?? '写入标题失败' }
+  const renamed = await renameSessionTitle(ctx, sessionId, title)
+  if (!renamed.ok) {
+    return { ok: false, error: renamed.error ?? '写入标题失败' }
   }
 
-  return { ok: true, title: renamed.result.value?.title ?? title }
+  return { ok: true, title: renamed.title ?? title }
 }
 
 /** 从 history 事件中提取最近 user 纯文本（只取用户输入，省 token 且更代表意图）。 */
@@ -171,11 +149,4 @@ function generateTitle(texts: string[]): string | undefined {
   const candidate = clean(userText)
   if (!candidate) return undefined
   return candidate.length <= 20 ? candidate : `${candidate.slice(0, 20)}…`
-}
-
-/** 生成一次宿主 RPC 调用 id。 */
-function makeRpcId(): string {
-  return typeof globalThis.crypto?.randomUUID === 'function'
-    ? globalThis.crypto.randomUUID()
-    : `${Date.now()}-${Math.random().toString(36).slice(2)}`
 }

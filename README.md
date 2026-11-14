@@ -1,8 +1,21 @@
-# dsh-dingo 2.0
+# dsh-dingo 2.4
 
 **English** | [中文](README.zh.md)
 
 **Ding + Go** — a DSH plugin for session cards, auto-naming, sounds, and deep links.
+
+## 2.4.1 fixes (DSH 0.2.2)
+
+- Auto-naming works again: `apiProxy` is gone in 0.2, so the button, `/dingo rename` and the
+  `rename_current_session` tool now use `sessionController.rename` / `events`, with the legacy
+  `apiProxy.sessions` path kept only as a fallback (`src/session-api.ts`). Host calls time out after 15s.
+- Tones are no longer missed: the `speaking` window floor is 4s (the client polls once per second) and
+  the client re-polls on `visibilitychange` / `focus` (background tabs get their timers throttled).
+- Quiet hours actually replay: the engine now arms a timer at the `quietHours` end instant.
+- System-notification deep links no longer hardcode port 3080; the host's own origin is used when unset.
+- `webServer` is an optional dependency: hosts without a web carrier just skip the `/dingo` RPC.
+- Cleanups: removed the never-effective `channelAuthority` config, debug logs and dead branches;
+  `toneStyle` now drives non-current sessions; title-cache reads are negatively cached.
 
 ## Features
 
@@ -32,6 +45,7 @@
 | 8 | Normal | completed and seen | grey |
 
 > Typing in the current session is a normal state and does not trigger the draft reminder; after switching away, the previous session's draft becomes a purple reminder again.
+> Scope: the client can only read the *current* session's input snapshot (`sessions.binding(id)` is limited to retained sessions), so the purple state covers sessions opened in this tab that were left with a draft.
 
 ## Usage
 
@@ -85,6 +99,8 @@ Both plugins can be used independently or together.
 /dingo dnd [on|off]
 /dingo rename
 ```
+
+> `/dingo on|off` is runtime-only (no settings persistence) and `off` also hides the summary pill.
 
 ## Install
 

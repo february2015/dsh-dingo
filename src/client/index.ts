@@ -87,6 +87,12 @@ export function apply(ctx: ClientContext): void {
     }
   }
   // 会话输入服务：用于读取任意会话的未发送草稿。
+  //
+  // 契约限制（DSH 0.2）：`SessionInputResolver` 只对外承诺 `for(ctx)`，
+  // `shell(sessionId)` 是内部 InputHub 的方法；而 `sessions.binding(id)` 只对
+  // 客户端已 retain 的会话（基本就是当前会话）返回。所以这里**只能稳定拿到
+  // 当前会话**的草稿，其它会话的草稿由组件里的模块级 Map 记住"离开时"的值
+  // （见 SessionCardRailCompact 的 persistedDrafts）。
   const conversation = ctx.get('conversation') as {
     input: {
       for(actx: unknown): { state: { getSnapshot(): { draft: string } } }
@@ -105,13 +111,11 @@ export function apply(ctx: ClientContext): void {
 
   // 系统通知深链：dingOpen 参数 + 标签页复用（已有 DSH 标签页接管跳转并聚焦）
   // 条件放宽：0.2 可能没有 `sessions` 服务，导航走 uiWorkspace；深链本身不依赖它。
-  if (true) {
-    ctx.effect(() => installDeepLink({
-      openSession: (sessionId: string) => openSession(sessionId),
-      channel: typeof BroadcastChannel !== 'undefined' ? new BroadcastChannel('dsh-dingo-deeplink') : undefined,
-      closeWindow: () => window.close(),
-    }), 'dsh-dingo: deeplink')
-  }
+  ctx.effect(() => installDeepLink({
+    openSession: (sessionId: string) => openSession(sessionId),
+    channel: typeof BroadcastChannel !== 'undefined' ? new BroadcastChannel('dsh-dingo-deeplink') : undefined,
+    closeWindow: () => window.close(),
+  }), 'dsh-dingo: deeplink')
 
   // 上报 DSH Web UI 前台可见性：host 据此决定是否发系统通知
   // （可见 → 浏览器内提醒已够；不可见/未开 → 系统通知）。

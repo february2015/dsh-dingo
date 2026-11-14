@@ -6,9 +6,6 @@
  * @module dsh-dingo/types
  */
 
-/** `/dingo` RPC 通道信任围栏（loopback 权威）。 */
-export type ChannelAuthority = 'loopback' | 'trusted-host';
-
 /**
  * 插件配置（已应用 schemastery 默认值的解析形状）。
  * schema 定义在 `src/index.ts`（`Config` 常量）。
@@ -27,13 +24,15 @@ export interface Config {
     announceOwnSessions: boolean;
     /** 静音时段（"HH:mm" 24h；空串 = 无；start>end 视为跨夜）。 */
     quietHours: { start: string; end: string };
-    /** 提示音档位（soft 柔和"叮" / crisp 清脆"当"；当前对话用 crisp，其他对话用 soft）。 */
+    /** 提示音档位（soft 柔和"叮" / crisp 清脆"当"；当前对话固定 crisp）。 */
     toneStyle: 'soft' | 'crisp';
   };
-  /** `/dingo on|off` 开关（默认开）。 */
+  /** `/dingo on|off` 开关（默认开；运行时内存态，重启回默认）。 */
   enabled: boolean;
-  /** `/dingo` RPC 通道信任围栏。 */
-  channelAuthority: ChannelAuthority;
+  /** 系统级通知总开关（macOS 通知中心 / Windows toast）。 */
+  systemNotify: boolean;
+  /** 系统通知深链基地址（空串 = 自动取宿主自述地址）。 */
+  systemNotifyBaseUrl: string;
 }
 
 /** 播报状态机状态（提醒插件恒 idle/非 listening；feedback 音频端口用）。 */

@@ -22,7 +22,7 @@ import { registerDingoCommand } from './command.ts';
 import { autoNameSession } from './auto-name.ts';
 import { installRenameTool } from './rename-tool.ts';
 import { sendSystemNotification } from './sysnotify.ts';
-import type { ChannelAuthority } from './types.ts';
+import { safeService } from './feedback.ts';
 import { sessionTitleFromCache } from './session-titles.ts';
 
 export const name = 'dsh-dingo';
@@ -34,10 +34,7 @@ export const name = 'dsh-dingo';
  * `workspaceController` 提供），所以这里只声明两件确定存在的；其余一律
  * `ctx.get()` 软取，缺了就走降级路径（cwd basename 兜底、不做跨工作区补卡）。
  */
-export const inject = ['connection', 'tools', 'webServer'] as const;
-
-/** 设置命名空间（settings UI / profile patch 可覆盖）。 */
-const NS = 'dingo';
+export const inject = ['connection', 'tools'] as const;
 
 /**
  * 插件配置 schema。所有字段带默认值；cordis 在 apply 前校验并补全。
@@ -56,12 +53,11 @@ export const Config = z.object({
     // 提示音档位：crisp（当前对话"当"）/ soft（其他对话"叮"）
     toneStyle: z.union(['soft', 'crisp']).default('soft'),
   }),
-  enabled: z.boolean().default(true), // /dingo on|off 开关（默认开；settings 持久化）
-  channelAuthority: z.union(['loopback', 'trusted-host']).default('loopback'),
+  enabled: z.boolean().default(true), // /dingo on|off 开关（默认开；运行时内存态，重启回默认）
   // 系统级通知（macOS 通知中心 / Windows toast）：其他对话的需回答/完成/失败
   // 额外发一条系统通知，点击直达对应会话（浏览器内卡片提醒不受影响）
   systemNotify: z.boolean().default(true),
-  // 系统通知点击直达用的 DSH WebUI 基地址（空 = http://127.0.0.1:3080）
+  // 系统通知点击直达用的 DSH WebUI 基地址（空 = 自动取宿主自述地址）
   systemNotifyBaseUrl: z.string().default(''),
 });
 
@@ -78,7 +74,6 @@ export function apply(ctx: Context, config: unknown): void {
       quietHours: { start: string; end: string };
       toneStyle: 'soft' | 'crisp';
     };
-    channelAuthority: string;
     systemNotify: boolean;
     systemNotifyBaseUrl: string;
   };
@@ -103,7 +98,9 @@ export function apply(ctx: Context, config: unknown): void {
   // DSH Web UI 前台可见时不发（浏览器内提醒已够）。可见性由客户端经
   // /dingo.set-visibility 上报，未上报（Web 未开）视为不可见 → 发系统通知。
   let webVisible = false;
-  const webuiBaseUrl = cfg.systemNotifyBaseUrl || 'http://127.0.0.1:3080';
+  // 深链基地址：显式配置优先，否则在真正发通知时问宿主（地址在 apply 之后才就绪，
+  // 且 0.2 的 Web GUI 是随机端口，写死 3080 会让 Windows toast 打开死链）。
+  const webuiBaseUrl = (): string => resolveWebuiBaseUrl(ctx, cfg.systemNotifyBaseUrl);
   const installOptions: FeedbackInstallOptions = {
     config: cfg.feedback as unknown as FeedbackInstallOptions['config'],
     audio,
@@ -128,7 +125,7 @@ export function apply(ctx: Context, config: unknown): void {
         title: 'DSH 提醒',
         message: text,
         sessionId: item.sessionId,
-        webuiBaseUrl,
+        webuiBaseUrl: webuiBaseUrl(),
         logger: (message) => logger.info(message),
       });
     },
@@ -136,9 +133,11 @@ export function apply(ctx: Context, config: unknown): void {
   let feedback: FeedbackEngine = installFeedback(ctx, installOptions);
 
   // ── 跨工作区补卡（DSH 0.2+） ────────────────────────────────────────
-  // 别的工作区里「你切走之后才起/才结束」的会话不会发事件给当前窗口，
-  // 所以定期拉一次宿主 sessionController.list()（全量、活跃度序、与 GUI 侧栏同源），
-  // 把在跑的 / 刚结束的补进药丸。服务缺席（旧宿主）→ 静默跳过。
+  // 宿主事件（session/event、agent/status）本来就是进程级全量，所以别的工作区
+  // 会话的后续变化照样能收到；这一层补的是**事件流覆盖不到的那部分**：
+  // 插件加载/DSH 重启前就已开始或刚结束、不会再产生新事件的会话。
+  // 定期拉一次 sessionController.list()（全量、活跃度序、与 GUI 侧栏同源）。
+  // 服务缺席（旧宿主）→ 静默跳过，只剩事件驱动。
   type SessionControllerLike = {
     list?(
       request: unknown,
@@ -148,7 +147,6 @@ export function apply(ctx: Context, config: unknown): void {
   const sessionController = (ctx as unknown as { get?: (name: string) => unknown }).get?.('sessionController') as
     | SessionControllerLike
     | undefined;
-  logger.warn('[dingo] cross-project: sessionController=' + (sessionController?.list ? 'yes' : 'no'));
   if (sessionController?.list) {
     let stopped = false;
     let reported = false;
@@ -157,8 +155,7 @@ export function apply(ctx: Context, config: unknown): void {
       let result: { items?: readonly import('./feedback.ts').ExternalSessionSummary[] } | undefined;
       try {
         // 这个 Remote 方法的真实签名是 list(request, signal)；部分小版本容忍单参，
-        // 先带 signal 调，抛了再退回单参 —— 之前只传一个参数、异常被吞掉，
-        // 表现就是「有卡片但标题永远补不上」。
+        // 先带 signal 调，抛了再退回单参。
         result = await sessionController.list!({}, new AbortController().signal);
       } catch (withSignal) {
         try {
@@ -182,26 +179,13 @@ export function apply(ctx: Context, config: unknown): void {
         }
       >;
       // 标题两个来源：list 的 'title' 投影（首选，不碰磁盘）→ 投影缓存（兜底）。
-      let fromProjection = 0;
-      let fromCache = 0;
       const items = raw.map((item) => {
         const projected = item?.projections?.values?.title;
         const projectedTitle = typeof projected === 'string' && projected !== '' ? projected : undefined;
-        if (projectedTitle !== undefined) fromProjection += 1;
         const cached = projectedTitle ?? item.sessionTitle ?? sessionTitleFromCache(item.sessionId);
-        if (projectedTitle === undefined && cached !== undefined) fromCache += 1;
         return { ...item, projectedTitle, sessionTitle: cached };
       });
       feedback.seedExternalSessions(items);
-      if (!reported) {
-        reported = true;
-        logger.warn(
-          '[dingo] cross-project: items=' + String(raw.length) +
-            ' projected=' + String(fromProjection) +
-            ' cache=' + String(fromCache) +
-            ' failures=' + String(failures),
-        );
-      }
     };
     void syncCrossProject();
     const timer = setInterval(() => void syncCrossProject(), 5000);
@@ -209,6 +193,8 @@ export function apply(ctx: Context, config: unknown): void {
       stopped = true;
       clearInterval(timer);
     }, 'dsh-dingo: cross-project session inventory');
+  } else {
+    logger.info('[dingo] sessionController.list 缺席（旧宿主）：跳过跨工作区补卡，仅事件驱动');
   }
 
   // ── `/dingo` RPC 通道 + 斜杠命令 ──
@@ -249,7 +235,7 @@ export function apply(ctx: Context, config: unknown): void {
         return { controller: true, error: String(error) };
       }
     },
-  }, cfg.channelAuthority as ChannelAuthority);
+  });
   // 对话内自然语言重命名：主 LLM 在当前上下文生成标题后调用本工具写入
   installRenameTool(ctx);
 
@@ -268,4 +254,31 @@ export function apply(ctx: Context, config: unknown): void {
     },
     autoName: (sessionId) => autoNameSession(ctx, sessionId),
   });
+}
+
+/**
+ * 系统通知点击直达用的 WebUI 基地址。
+ *
+ * 优先级：显式配置 → `webApp.getAdvertisedUrl()`（宿主自述、可能自带访问票据）
+ * → `webServer.getOrigin()`（本进程监听的 origin）→ 旧默认 3080。
+ * 必须在真正发通知时现取：地址在 apply 阶段往往还没就绪，而且 0.2 的端口是随机的。
+ * @param ctx - 宿主上下文。
+ * @param configured - 用户配置的基地址（空串 = 自动）。
+ * @returns 可用于拼深链的基地址。
+ */
+export function resolveWebuiBaseUrl(ctx: Context, configured: string): string {
+  if (configured !== '') return configured;
+  try {
+    const advertised = safeService<{ getAdvertisedUrl?(): string }>(ctx, 'webApp')?.getAdvertisedUrl?.();
+    if (typeof advertised === 'string' && advertised !== '') return advertised;
+  } catch {
+    // 服务未就绪/不允许访问 → 继续降级
+  }
+  try {
+    const origin = safeService<{ getOrigin?(): string }>(ctx, 'webServer')?.getOrigin?.();
+    if (typeof origin === 'string' && origin !== '') return origin;
+  } catch {
+    // 同上
+  }
+  return 'http://127.0.0.1:3080';
 }

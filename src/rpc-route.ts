@@ -31,6 +31,17 @@ export type RpcEndpointHandler = (endpoint: string, payload: unknown) => Promise
 /** endpoint 段允许的字符集（对齐 dsh-client-connection 的 endpointFromPath）。 */
 const ENDPOINT_SEGMENT = /^[A-Za-z0-9_$.-]+$/;
 
+/** 请求体上限（字节）：/dingo 的入参都是小 JSON，超过即拒，防内存被撑爆。 */
+const MAX_BODY_BYTES = 1_048_576;
+
+/** 请求体超限（与"读流失败"区分，前者回 413）。 */
+class BodyTooLargeError extends Error {
+  constructor() {
+    super(`request body exceeds ${MAX_BODY_BYTES} bytes`);
+    this.name = 'BodyTooLargeError';
+  }
+}
+
 /** 从 pathname 解出相对 channel 的 endpoint；非法段返回 undefined。 */
 function endpointOf(channel: string, pathname: string): string | undefined {
   if (!pathname.startsWith(`${channel}/`)) return undefined;
@@ -41,12 +52,21 @@ function endpointOf(channel: string, pathname: string): string | undefined {
   return endpoint;
 }
 
-/** 读取 node:http 请求体。 */
+/** 读取 node:http 请求体（带字节上限）。 */
 function readBody(req: { on(event: string, listener: (...args: unknown[]) => void): unknown }): Promise<string> {
   return new Promise((resolve, reject) => {
-    const chunks: unknown[] = [];
-    req.on('data', (chunk) => chunks.push(chunk));
-    req.on('end', () => resolve(Buffer.concat(chunks as Buffer[]).toString('utf8')));
+    const chunks: Buffer[] = [];
+    let total = 0;
+    req.on('data', (chunk) => {
+      const buf = Buffer.isBuffer(chunk) ? chunk : Buffer.from(String(chunk));
+      total += buf.length;
+      if (total > MAX_BODY_BYTES) {
+        reject(new BodyTooLargeError());
+        return;
+      }
+      chunks.push(buf);
+    });
+    req.on('end', () => resolve(Buffer.concat(chunks).toString('utf8')));
     req.on('error', reject);
   });
 }
@@ -79,12 +99,35 @@ interface RouteResponse {
 
 /**
  * 注册一个 RPC 前缀通道。
- * @param ctx - 宿主上下文（inject 里必须有 `webServer`）。
+ *
+ * `webServer` 不是硬依赖：没有 Web 载体的宿主（headless / sdk）只跳过 RPC，
+ * 提示音、卡片、命令等其余能力照常工作。所以这里不写进静态 `inject`，而是用
+ * 动态 `ctx.inject` 等服务就绪再挂（服务已在则回调立即执行，不会抢跑、也不会重复挂）。
+ * @param ctx - 宿主上下文。
  * @param channel - 通道前缀，如 `/dingo`。
  * @param handler - 端点处理。
  * @param label - effect 标签（卸载时用于日志）。
  */
 export function registerRpcChannel(ctx: Context, channel: string, handler: RpcEndpointHandler, label: string): void {
+  const inject = (ctx as unknown as {
+    inject?: (deps: string[], callback: (scope: Context) => void) => unknown;
+  }).inject;
+  if (typeof inject !== 'function') return;
+  inject.call(ctx, ['webServer'], (scope) => {
+    const server = safeService<WebServerLike>(scope, 'webServer');
+    if (!server?.register) return;
+    const route = createRoute(scope, channel, handler);
+    scope.effect(() => server.register(route), label);
+  });
+}
+
+/** webServer 的最小形状（插件不依赖它的类型包）。 */
+interface WebServerLike {
+  register(route: unknown): () => void;
+}
+
+/** 组装前缀路由（校验/信封/错误码都在这里）。 */
+function createRoute(ctx: Context, channel: string, handler: RpcEndpointHandler): unknown {
   const connection = safeService<{ requestRejection?: (req: unknown) => number | undefined }>(ctx, 'connection');
   const reject = typeof connection?.requestRejection === 'function'
     ? (req: unknown): number | undefined => connection.requestRejection!(req)
@@ -95,7 +138,7 @@ export function registerRpcChannel(ctx: Context, channel: string, handler: RpcEn
     res.end(Buffer.from(JSON.stringify(body)));
   };
 
-  const route = {
+  return {
     kind: 'prefix' as const,
     path: channel,
     handler: async (req: RouteRequest, res: RouteResponse): Promise<void> => {
@@ -123,9 +166,22 @@ export function registerRpcChannel(ctx: Context, channel: string, handler: RpcEn
         res.end('content type must be application/json');
         return;
       }
+      let raw: string;
+      try {
+        raw = await readBody(req);
+      } catch (error) {
+        if (error instanceof BodyTooLargeError) {
+          res.writeHead(413);
+          res.end('body too large');
+          return;
+        }
+        res.writeHead(400);
+        res.end('body read failed');
+        return;
+      }
       let body: { type?: unknown; rpcId?: unknown; method?: unknown; payload?: unknown };
       try {
-        body = JSON.parse(await readBody(req)) as typeof body;
+        body = JSON.parse(raw) as typeof body;
       } catch {
         res.writeHead(400);
         res.end('body is not JSON');
@@ -162,6 +218,4 @@ export function registerRpcChannel(ctx: Context, channel: string, handler: RpcEn
       sendJson(res, 200, { type: 'server-response', rpcId: body.rpcId, result: toWireResult(result) });
     },
   };
-
-  ctx.effect(() => (ctx as unknown as { webServer: { register(route: unknown): () => void } }).webServer.register(route), label);
 }

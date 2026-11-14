@@ -30,12 +30,12 @@ export interface DingoCommandDeps {
 export function registerDingoCommand(ctx: Context, deps: DingoCommandDeps): void {
   const commands = ctx.get('commands');
   if (commands === undefined) return; // headless deployments without the command registry
-  commands.register({
+  ctx.effect(() => commands.register({
     name: 'dingo',
     description: 'dsh-dingo: on|off|status|dnd|rename',
     input: { hint: 'on | off | status | dnd [on|off] | rename' },
     handler: (invocation) => dingoCommand(invocation, deps),
-  });
+  }), 'dsh-dingo: /dingo command');
 }
 
 async function dingoCommand(invocation: CommandInvocation, deps: DingoCommandDeps): Promise<CommandResult> {
@@ -75,7 +75,7 @@ function statusText(deps: DingoCommandDeps): string {
   const speaking = feedback.queue.find((item) => item.state === 'speaking');
   return [
     `dsh-dingo: ${deps.runtime.enabled() ? 'on' : 'off'} · dnd: ${deps.runtime.dnd() ? 'on' : 'off'}`,
-    `feedback: enabled · queue ${pending} pending · ${speaking ? `speaking「${speaking.text}」` : 'idle'}`,
+    `feedback: ${feedback.enabled ? 'enabled' : 'off'} · queue ${pending} pending · ${speaking ? `speaking「${speaking.text}」` : 'idle'}`,
     `  quietNow: ${feedback.quietNow ? 'yes' : 'no'} · dedupeWindow: ${feedback.dedupeWindowMs}ms`,
     'Use /dingo on|off to enable/disable reminders.',
   ].join('\n');

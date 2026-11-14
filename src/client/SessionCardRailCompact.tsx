@@ -269,6 +269,21 @@ function readStoredCurrentSession(): string | undefined {
   }
 }
 
+/** 存储读取结果的模块级缓存（渲染期每帧扫 localStorage 太贵，1s 内复用）。 */
+let storedCurrentCache: { at: number; value: string | undefined } | undefined
+const STORED_CURRENT_TTL_MS = 1000
+
+/** 带缓存的 {@link readStoredCurrentSession}（仅作为 useSessions 缺席时的兜底）。 */
+function readStoredCurrentSessionCached(): string | undefined {
+  const now = Date.now()
+  if (storedCurrentCache !== undefined && now - storedCurrentCache.at < STORED_CURRENT_TTL_MS) {
+    return storedCurrentCache.value
+  }
+  const value = readStoredCurrentSession()
+  storedCurrentCache = { at: now, value }
+  return value
+}
+
 /**
  * 紧凑统计 Rail：内嵌只显示一个统计胶囊，悬停/点击弹出详细卡片面板。
  */
@@ -282,7 +297,7 @@ export function SessionCardRailCompact({ rpc, openSession: openTarget, useSessio
    * （`localStorage` 的 `dsh.sessions.current`，就是侧栏那个"当前会话"），
    * 再兜底用 host 快照里回传的 activeSessionId。三层任一命中即可。
    */
-  const storedCurrent = readStoredCurrentSession()
+  const storedCurrent = readStoredCurrentSessionCached()
   const currentSessionId = useSessions?.((s) => s.current) ?? storedCurrent ?? snapshot?.activeSessionId
   /** 各会话 displayTitle（与侧边栏同一数据源；host 标题缺失时卡片兜底显示）。 */
   const sessionTitles = useSessions?.((s) => s.byId)
@@ -458,7 +473,8 @@ export function SessionCardRailCompact({ rpc, openSession: openTarget, useSessio
             seenSpeaking.current.add(item.id)
             if (item.tone !== 'none' && !tonePlayed.current.has(item.id)) {
               tonePlayed.current.add(item.id)
-              playTone(item.tone, item.own === true ? 'crisp' : 'soft')
+              // 当前对话固定 crisp；其它对话用配置档位（toneStyle 缺省 soft）。
+              playTone(item.tone, item.own === true ? 'crisp' : (next.toneStyle ?? 'soft'))
             }
           }
           // 曾 speaking、本轮已不 speaking（host 超时/上报后移除）→ 补报 spoken
@@ -484,9 +500,19 @@ export function SessionCardRailCompact({ rpc, openSession: openTarget, useSessio
 
     void poll()
     const timer = setInterval(() => void poll(), POLL_INTERVAL_MS)
+    // 后台标签页的定时器会被浏览器节流（最狠时 1 分钟一次），一回到前台立刻补查：
+    // 否则"切走时到达的提醒"要等下一个周期，那时 speaking 窗口早过了，提示音就丢了。
+    const onWake = (): void => {
+      if (typeof document !== 'undefined' && document.visibilityState === 'hidden') return
+      void poll()
+    }
+    if (typeof document !== 'undefined') document.addEventListener('visibilitychange', onWake)
+    if (typeof window !== 'undefined') window.addEventListener('focus', onWake)
     return () => {
       stopped = true
       clearInterval(timer)
+      if (typeof document !== 'undefined') document.removeEventListener('visibilitychange', onWake)
+      if (typeof window !== 'undefined') window.removeEventListener('focus', onWake)
     }
   }, [rpc])
 
@@ -514,10 +540,6 @@ export function SessionCardRailCompact({ rpc, openSession: openTarget, useSessio
 
   const snapshotAvailable = snapshot !== undefined && snapshot.enabled
   const items = snapshot?.cards ?? []
-  if (!snapshotAvailable) {
-    // 快照未就绪/被关闭：不渲染（下方 showBar 为 false 直接走隐藏），
-    // 但计算保持在早退之前，保证 hooks 顺序稳定。
-  }
 
   // 补卡：host 卡片之外，客户端从会话快照补出「仍在活跃」的会话——
   // 执行中（running）、待你回答（pendingInteraction）、已完成未读（completed）、
@@ -545,15 +567,12 @@ export function SessionCardRailCompact({ rpc, openSession: openTarget, useSessio
     if (!hasDraft && !hasJobs && !needsReply && !busy && !doneUnread) continue
     // × 关闭后的合成卡抑制：summary 未翻转为干净之前，不再立刻把同一张卡
     // 重新合成出来（否则「关闭按钮不好使」——host 卡片删了，客户端又按
-    // running 补一张，看起来 × 永远点不掉）。
+    // running 补一张，看起来 × 永远点不掉）。走得到这里说明至少还有一个
+    // 活跃原因，所以只需判断抑制窗口是否过期。
     const dismissedAt = syntheticDismissedAt.current.get(sid)
     if (dismissedAt !== undefined) {
-      const sameReason = busy || needsReply || doneUnread || hasDraft || hasJobs
-      if (!sameReason) {
-        syntheticDismissedAt.current.delete(sid)
-      } else if (Date.now() - dismissedAt < SYNTHETIC_DISMISS_SUPPRESS_MS) {
-        continue
-      }
+      if (Date.now() - dismissedAt < SYNTHETIC_DISMISS_SUPPRESS_MS) continue
+      syntheticDismissedAt.current.delete(sid)
     }
     const status: SessionCardStatus = needsReply ? 'question' : busy ? 'running' : doneUnread ? 'answered' : 'normal'
     syntheticCards.push({

@@ -2,6 +2,24 @@
 
 [English](README.md) | **中文**
 
+> **2.4.1（2026-11-14）可用性修复（适配 DSH 0.2.2 实测）**
+>
+> - **自动命名恢复**：0.2 已移除 `apiProxy`，按钮 / `/dingo rename` / `rename_current_session`
+>   三条入口改为优先走 `sessionController.rename` / `events`，旧 `apiProxy.sessions` 仅作兜底
+>   （见 `src/session-api.ts`）；宿主调用统一带 15s 超时，不再永久转圈。
+> - **提示音不再丢**：`speaking` 可见窗口下限从 0.8s 提到 4s（客户端 1s 轮询需要足够宽的窗口），
+>   并在 `visibilitychange` / `focus` 时立即补查一次（后台标签页定时器会被浏览器节流）。
+> - **静音时段结束后真的补播**：之前只有入队时判定，没有唤醒源；现在会按 `quietHours` 结束点
+>   定闹钟，到点自动 `requeueDeferred()` + 播报。
+> - **系统通知深链端口不再写死 3080**：空配置时取宿主自述地址（`webApp.getAdvertisedUrl()` →
+>   `webServer.getOrigin()`），0.2 的随机端口也能点开。
+> - **`webServer` 降为软依赖**：无 Web 载体的宿主（headless / SDK）只跳过 `/dingo` RPC，
+>   提示音、卡片、命令照常；不再因为缺服务导致整个插件不加载。
+> - 清理：删除从未生效的 `channelAuthority` 配置、启动调试日志、无用的 `sameReason` / 空 `if` / `if (true)`；
+>   `toneStyle` 现在真的控制"其他对话"的档位（当前对话固定 crisp）；`/dingo status` 的
+>   `feedback:` 不再硬编码 enabled；投影缓存标题读取加负缓存，避免每秒对无标题会话重复 `stat`。
+> - 新增 26 个测试（`session-api`、`rpc-route`、静音唤醒、seed 卡生命周期、播报窗口）。
+
 > **2.4.0（2026-11-13）适配 DSH 0.2.2**
 >
 > - **能装进 0.2 了**：宿主 `apiProxy` 在 0.2 已被拆掉，改为 `ctx.get()` 软取；`/dingo` RPC 改用 `webServer` 作用域上下文注册（无 webserver 的宿主静默跳过）；客户端 inject 去掉已删除的 `dsh-client-runtime`，补 `dsh-client-ui-workspace` / `dsh-api-session-controller`。
@@ -44,6 +62,10 @@
 | 8 | 正常 | 已完成且已看过 | 灰 |
 
 > 当前对话正在输入内容属于正常状态，不触发顶部草稿提醒；切到其它对话后原对话草稿会恢复紫色提醒。
+>
+> 草稿检测的边界：客户端只能稳定拿到**当前会话**的输入快照（0.2 的 `sessions.binding(id)`
+> 只对已 retain 的会话有效），所以紫色提醒覆盖的是"在本标签页里打开过、离开时留了草稿"的会话；
+> 其它标签页里打的草稿、以及刷新页面之前的历史草稿看不到。
 
 ---
 
@@ -137,13 +159,15 @@ DSH profile 通过 `link:/path/to/dsh-dingo` 指向本仓库时，重启 DSH 后
   config:
     enabled: true
     feedback:
-      toneStyle: soft
+      toneStyle: soft          # 其他对话的提示音档位（当前对话固定 crisp）
       dnd: false
       dedupeWindowMs: 10000
-      quietHours: { start: '', end: '' }
+      quietHours: { start: '', end: '' }   # 静音时段，结束后自动补播
     # systemNotify: true
-    # systemNotifyBaseUrl: ''
+    # systemNotifyBaseUrl: ''  # 留空 = 自动取宿主地址（0.2 的端口是随机的）
 ```
+
+> `/dingo on|off` 只影响运行时（重启回默认），目前不写 settings；`off` 时统计胶囊也一起隐藏。
 
 ---
 

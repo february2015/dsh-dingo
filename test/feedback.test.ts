@@ -5,8 +5,16 @@
  * - need-confirm（approval/ask_user/questions）当前对话也提醒；
  * - DND / 去重 / 静音时段。
  */
-import { describe, expect, it } from 'vitest'
-import { FeedbackEngine, formatAnnouncement, firstParagraph, isQuietNow, toMinutes } from '../src/feedback.ts'
+import { describe, expect, it, vi } from 'vitest'
+import {
+  FeedbackEngine,
+  estimateSpeechMs,
+  formatAnnouncement,
+  firstParagraph,
+  isQuietNow,
+  quietEndAt,
+  toMinutes,
+} from '../src/feedback.ts'
 import { inject } from '../src/index.ts'
 import { FakeAudio, feedbackConfig, flush } from './feedback-fixture.ts'
 import type { FeedbackAudio } from '../src/feedback.ts'
@@ -38,6 +46,10 @@ function sessionEvent(type: string, data: unknown = {}, extra: Record<string, un
 describe('plugin dependencies', () => {
   it('declares host services before feedback, RPC, and rename-tool initialization read them', () => {
     expect(inject).toEqual(expect.arrayContaining(['connection', 'tools']))
+  })
+
+  it('webServer 不是硬依赖（无 Web 载体时插件仍应加载）', () => {
+    expect([...inject]).not.toContain('webServer')
   })
 })
 
@@ -292,5 +304,116 @@ describe('2.0 当前对话完成自动视为已看过', () => {
       { sessionId: 's-remote', cwd: '/tmp/proj-a', running: true, updatedAt: Date.now(), sessionTitle: '新名字' },
     ])
     expect(engine.snapshot().cards.find((c) => c.sessionId === 's-remote')?.sessionTitle).toBe('新名字')
+  })
+})
+describe('静音时段：结束时刻与补播', () => {
+  it('quietEndAt：同日时段返回今天结束点，跨夜时段分清今天/明天', () => {
+    const sameDay = quietEndAt({ start: '12:00', end: '14:00' }, new Date('2026-08-15T13:10:00'))
+    expect(new Date(sameDay!).getHours()).toBe(14)
+    expect(new Date(sameDay!).getDate()).toBe(15)
+
+    // 跨夜 22:00→06:00：上半夜结束于明天 06:00
+    const beforeMidnight = quietEndAt({ start: '22:00', end: '06:00' }, new Date('2026-08-15T23:30:00'))
+    expect(new Date(beforeMidnight!).getDate()).toBe(16)
+    expect(new Date(beforeMidnight!).getHours()).toBe(6)
+
+    // 跨夜 22:00→06:00：下半夜结束于今天 06:00
+    const afterMidnight = quietEndAt({ start: '22:00', end: '06:00' }, new Date('2026-08-16T02:00:00'))
+    expect(new Date(afterMidnight!).getDate()).toBe(16)
+    expect(new Date(afterMidnight!).getHours()).toBe(6)
+
+    expect(quietEndAt({ start: '22:00', end: '06:00' }, new Date('2026-08-16T12:00:00'))).toBeUndefined()
+    expect(quietEndAt({ start: '', end: '' }, new Date())).toBeUndefined()
+  })
+
+  it('静音时段内入队 → deferred；时段结束后 recheck 补播（不需要新事件）', async () => {
+    // 固定一个"静音中"的时钟，再手动推到时段结束之后
+    let now = new Date('2026-08-15T23:30:00').getTime()
+    const { engine, audio } = build({
+      now: () => now,
+      config: { quietHours: { start: '22:00', end: '06:00' } },
+    })
+    engine.handleSessionEvent({ id: 'sess-b' }, sessionEvent('turn/end', { reason: { kind: 'completed' } }))
+    await flush()
+    expect(audio.tones).toHaveLength(0)
+    expect(engine.pendingViews()[0]?.state).toBe('deferred')
+
+    now = new Date('2026-08-16T06:00:01').getTime()
+    engine.recheck()
+    await flush()
+    expect(audio.tones).toEqual(['ding'])
+  })
+})
+
+describe('播报窗口', () => {
+  it('estimateSpeechMs 下限 4s（覆盖客户端 1s 轮询），上限 30s', () => {
+    expect(estimateSpeechMs('【叮】有回复')).toBe(4000)
+    expect(estimateSpeechMs('')).toBe(4000)
+    expect(estimateSpeechMs('长'.repeat(1000))).toBe(30_000)
+  })
+})
+
+describe('跨工作区 seed 卡的生命周期', () => {
+  it('× 掉的 seed 卡不会被下一次 seed 立刻加回来', () => {
+    const { engine } = build()
+    const item = { sessionId: 's-remote', cwd: '/tmp/proj-a', running: true, updatedAt: Date.now() }
+    engine.seedExternalSessions([item])
+    expect(engine.cardViews()).toHaveLength(1)
+    engine.dismissCard('s-remote')
+    expect(engine.cardViews()).toHaveLength(0)
+    engine.seedExternalSessions([item])
+    expect(engine.cardViews()).toHaveLength(0)
+  })
+
+  it('宿主清单里消失的 seed 卡会被移除', () => {
+    const { engine } = build()
+    engine.seedExternalSessions([{ sessionId: 's-remote', running: true, updatedAt: Date.now() }])
+    expect(engine.cardViews()).toHaveLength(1)
+    engine.seedExternalSessions([])
+    expect(engine.cardViews()).toHaveLength(0)
+  })
+
+  it('长期停在「待阅读」的 seed 卡超过 TTL 后自动清理（避免永久绿点）', () => {
+    let now = 1_000_000
+    const { engine } = build({ now: () => now })
+    // 刚结束 5 分钟：种成 answered
+    engine.seedExternalSessions([{ sessionId: 's-remote', running: false, updatedAt: now - 5 * 60_000 }])
+    expect(engine.cardViews()[0]?.status).toBe('answered')
+
+    // 7 小时后仍在清单里，但已远超 TTL → 移除
+    now += 7 * 60 * 60_000
+    engine.seedExternalSessions([{ sessionId: 's-remote', running: false, updatedAt: now - 5 * 60_000 }])
+    expect(engine.cardViews()).toHaveLength(0)
+  })
+
+  it('seed 卡转成事件卡后，改标题仍然生效', () => {
+    const { engine } = build()
+    engine.seedExternalSessions([{ sessionId: 's-remote', running: true, updatedAt: Date.now(), sessionTitle: '旧名' }])
+    engine.seedExternalSessions([{ sessionId: 's-remote', running: true, updatedAt: Date.now(), sessionTitle: '新名' }])
+    expect(engine.cardViews()[0]?.sessionTitle).toBe('新名')
+  })
+})
+
+
+describe('静音时段：定时唤醒（无需外部触发）', () => {
+  it('静音中入队 → deferred；到点自动补播', async () => {
+    vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout', 'Date'] })
+    try {
+      vi.setSystemTime(new Date('2026-08-16T05:59:30'))
+      const { engine, audio } = build({
+        now: () => Date.now(),
+        config: { quietHours: { start: '22:00', end: '06:00' } },
+      })
+      engine.handleSessionEvent({ id: 'sess-b' }, sessionEvent('turn/end', { reason: { kind: 'completed' } }))
+      await vi.advanceTimersByTimeAsync(0)
+      expect(audio.tones).toHaveLength(0)
+      expect(engine.pendingViews()[0]?.state).toBe('deferred')
+
+      // 推进 31s：跨过 06:00（静音结束）→ 定时器把项放回 pending 并播报
+      await vi.advanceTimersByTimeAsync(31_000)
+      expect(audio.tones).toEqual(['ding'])
+    } finally {
+      vi.useRealTimers()
+    }
   })
 })

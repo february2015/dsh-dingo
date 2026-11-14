@@ -14,7 +14,6 @@
  * @module dsh-dingo/rpc
  */
 import type { Context } from '@deepseek-ai/cordis';
-import type { ChannelAuthority } from './types.ts';
 import type { FeedbackEngine, FeedbackSnapshot } from './feedback.ts';
 import { autoNameSession } from './auto-name.ts';
 import { registerRpcChannel, type RpcEndpointHandler } from './rpc-route.ts';
@@ -47,12 +46,11 @@ export interface DingoRpcDeps {
  *
  * 走插件自注册的前缀路由（见 ./rpc-route.ts）—— 本版 DSH 的
  * `connection.rpc.handle` 在服务内部 fiber 上解析不到 `webServer`，直接调用必抛。
- * @param ctx - 宿主上下文（inject 必须含 `webServer`）。
+ * 鉴权/信任围栏由 `connection.requestRejection` 统一负责（路由层只是转调）。
+ * @param ctx - 宿主上下文。
  * @param deps - 引擎与回调。
- * @param authority - 信任围栏配置（浏览器鉴权由 connection.requestRejection 兜底，这里只做记录）。
  */
-export function installDingoRpc(ctx: Context, deps: DingoRpcDeps, authority: ChannelAuthority): void {
-  void authority;
+export function installDingoRpc(ctx: Context, deps: DingoRpcDeps): void {
   const handler: RpcEndpointHandler = async (endpoint, payload) => {
     try {
       switch (endpoint) {
