@@ -59,13 +59,20 @@
   - **Empty state**: with no active sessions (e.g. right after a restart, before any event) the bar stays visible showing a grey dot + `0`; opening it shows "暂无活跃会话" — it never silently disappears.
   - **Visible on load**: no need to wait for new events — running / awaiting-reply / completed-unread / draft / background-work states are derived client-side from the session snapshot and merged with host cards once they arrive.
   - The session header keeps the workspace label and the `Rename` (auto-name) button.
-- Hover or click the bar to open the detailed panel **upward**:
+- **Entering the bar opens the detailed panel immediately** (no hover delay), upward from the bar:
   - First line: workspace name (with a small spinner + unfinished background task count if any).
   - Second line: session name.
   - Different colors per status.
   - Click a card to open that session.
   - `×` removes the card for this round.
-- The panel auto-closes after 5 seconds, or you can click the bar to toggle it.
+  - A `Lock` toggle sits at the panel's top right.
+- **Close rhythm** (while unlocked):
+  - leaving the bar/panel closes it after ~0.5s;
+  - 5s without any activity (no pointer movement, no click) closes it;
+  - **clicking anywhere outside closes it immediately** — clicking the account/settings button is no longer blocked by the panel;
+  - opening a card closes it after jumping.
+- **Lock**: the panel then ignores all automatic closes (leave, idle, outside click), handy for hopping between several
+  sessions; click `Unlock` or the bar itself to restore the automatic behaviour.
 - The bar is always visible at the sidebar foot, including the hero / new-session screen; when the sidebar collapses to the 56px rail it becomes a compact icon.
 - Subagent / Worker sessions do not appear in the card list.
 

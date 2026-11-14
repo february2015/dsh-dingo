@@ -38,6 +38,12 @@ export interface AnnouncementView {
 /** × 关闭一张合成卡后，同一种 summary 状态下不再立刻重新合成的时间窗（5 分钟）。 */
 const SYNTHETIC_DISMISS_SUPPRESS_MS = 5 * 60_000
 
+/** 面板空闲自动关闭（ms）：鼠标停着不动、也没在面板里操作时的兜底。 */
+const PANEL_IDLE_CLOSE_MS = 5_000
+
+/** 鼠标离开（胶囊与面板都出去了）后延迟关闭（ms）：给"移回面板"留一点时间。 */
+const PANEL_LEAVE_CLOSE_MS = 500
+
 /** 2.0 会话卡片状态。 */
 export type SessionCardStatus = 'running' | 'answered' | 'question' | 'error' | 'normal'
 
@@ -91,6 +97,15 @@ function basename(path?: string): string | undefined {
 
 /** 跨会话草稿持久化（模块级，避免 header 随会话切换重挂载后丢失）。 */
 const persistedDrafts = new Map<string, string>()
+
+/**
+ * 面板锁定态（模块级：宽屏与窄屏两个实例、组件重挂载后都保持）。
+ *
+ * 锁定 = 不自动收起（移开鼠标、点面板外、5s 空闲都不收）；点胶囊或再点一次
+ * "锁定"按钮才收。读它一律用这个模块变量，不用 React state——state 更新是异步的，
+ * 收起判断里读到旧值会造成"锁了还在自动关"。
+ */
+let panelLocked = false
 
 /** 2.0 状态图标：执行中=spinner；有答案=绿方块；有疑问=橙问号；有异常=红感叹号；正常=灰圆点。 */
 function SessionStatusIcon({ status }: { status: SessionCardStatus }): JSX.Element {
@@ -362,46 +377,37 @@ export function SessionCardRailCompact({ rpc, openSession: openTarget, useSessio
     return () => query.removeEventListener('change', sync)
   }, [])
   const closeTimer = useRef<ReturnType<typeof setTimeout> | undefined>(undefined)
-  /** 悬浮开面板的延迟定时器（鼠标只是路过不该弹）。 */
-  const hoverTimer = useRef<ReturnType<typeof setTimeout> | undefined>(undefined)
   /** 鼠标离开后的延迟关闭定时器（给"移到面板上"留一点时间）。 */
   const leaveTimer = useRef<ReturnType<typeof setTimeout> | undefined>(undefined)
+  /** 锁定态（只用于渲染；判断逻辑一律读模块级 panelLocked）。 */
+  const [locked, setLocked] = useState<boolean>(panelLocked)
 
-  /** 鼠标停在胶囊上 ≥700ms 才自动展开；移开就取消。 */
+  /**
+   * 鼠标一进入胶囊就展开，没有延迟。
+   *
+   * 以前是"停留 700ms 才弹"，会让人觉得悬停没反应；现在弹出即时，收起交给三条
+   * 明确节奏：移开约 0.5s、空闲 5s、点面板外立刻收；锁定时都不收。误触弹出也不怕——
+   * 点别处（比如账号/设置）就没了。
+   */
   const scheduleHoverOpen = (): void => {
     if (panelOpen) return
-    if (typeof leaveTimer.current !== 'undefined') {
-      clearTimeout(leaveTimer.current)
-      leaveTimer.current = undefined
-    }
-    if (typeof hoverTimer.current !== 'undefined') clearTimeout(hoverTimer.current)
-    hoverTimer.current = setTimeout(() => {
-      hoverTimer.current = undefined
-      openPanel()
-    }, 700)
-  }
-
-  /** 取消待触发的悬浮展开。 */
-  const cancelHoverOpen = (): void => {
-    if (typeof hoverTimer.current !== 'undefined') {
-      clearTimeout(hoverTimer.current)
-      hoverTimer.current = undefined
-    }
+    cancelLeaveClose()
+    openPanel()
   }
 
   /**
    * 鼠标离开后稍等再收起。
    *
    * 之前是"离开完全不收"，面板就一直挂在 footer 上方，把「设置 / 账号」
-   * 那一排挡住点不到。现在移开 ~400ms 就收；移到面板上则取消这次收起。
+   * 那一排挡住点不到。现在移开 ~0.5s 就收；移到面板上则取消这次收起；锁定时不收。
    */
   const scheduleLeaveClose = (): void => {
-    cancelHoverOpen()
+    if (panelLocked) return
     if (typeof leaveTimer.current !== 'undefined') clearTimeout(leaveTimer.current)
     leaveTimer.current = setTimeout(() => {
       leaveTimer.current = undefined
       closePanel()
-    }, 400)
+    }, PANEL_LEAVE_CLOSE_MS)
   }
 
   /** 取消"离开关闭"（鼠标进到面板里了）。 */
@@ -412,30 +418,57 @@ export function SessionCardRailCompact({ rpc, openSession: openTarget, useSessio
     }
   }
 
-  /** 打开面板并重置 5 秒自动关闭计时。 */
-  const openPanel = (): void => {
-    setPanelOpen(true)
-    resetCloseTimer()
-  }
-
-  /** 关闭面板并清除自动关闭计时。 */
-  const closePanel = (): void => {
-    cancelHoverOpen()
-    cancelLeaveClose()
-    setPanelOpen(false)
+  /** 清掉空闲自动关闭计时。 */
+  const clearCloseTimer = (): void => {
     if (closeTimer.current !== undefined) {
       clearTimeout(closeTimer.current)
       closeTimer.current = undefined
     }
   }
 
-  /** 重置 5 秒自动关闭计时（鼠标在面板上互动时也会续期）。 */
+  /**
+   * 重置空闲自动关闭（锁定时不设）。
+   *
+   * 只要还有动作（鼠标在胶囊/面板里移动、移进面板）就续期；彻底没动作
+   * {@link PANEL_IDLE_CLOSE_MS} 之后自动收起，避免面板长期挂在侧栏上。
+   */
   const resetCloseTimer = (): void => {
-    if (closeTimer.current !== undefined) clearTimeout(closeTimer.current)
+    clearCloseTimer()
+    if (panelLocked) return
     closeTimer.current = setTimeout(() => {
       closeTimer.current = undefined
       setPanelOpen(false)
-    }, 5000)
+    }, PANEL_IDLE_CLOSE_MS)
+  }
+
+  /** 打开面板并启动空闲关闭（锁定中则保持常开）。 */
+  const openPanel = (): void => {
+    setPanelOpen(true)
+    resetCloseTimer()
+  }
+
+  /** 面板开着时的"还在看"续期（关着就什么都不做，避免空转定时器）。 */
+  const keepAlive = (): void => {
+    if (panelOpen) resetCloseTimer()
+  }
+
+  /** 关闭面板并清除自动关闭计时。 */
+  const closePanel = (): void => {
+    cancelLeaveClose()
+    clearCloseTimer()
+    setPanelOpen(false)
+  }
+
+  /** 锁定/解锁面板：锁定后不再自动收起。 */
+  const toggleLock = (): void => {
+    panelLocked = !panelLocked
+    setLocked(panelLocked)
+    if (panelLocked) {
+      cancelLeaveClose()
+      clearCloseTimer()
+    } else {
+      resetCloseTimer()
+    }
   }
 
   /** 点击卡片：执行中只跳转；结论态跳转并标记「正常」（已看过）。 */
@@ -445,7 +478,8 @@ export function SessionCardRailCompact({ rpc, openSession: openTarget, useSessio
     if (card.status !== 'running') {
       void rpc.call('/dingo', 'feedback', { action: 'mark-seen', sessionId: card.sessionId }).catch(() => {})
     }
-    closePanel()
+    // 锁定时保持展开：这样可以连着点几个会话来回切换，面板不消失。
+    if (!panelLocked) closePanel()
   }
 
   /** 关闭完整面板里的卡片：仅移除本次卡片（并临时抑制合成卡回生）。 */
@@ -524,6 +558,24 @@ export function SessionCardRailCompact({ rpc, openSession: openTarget, useSessio
     setDrafts({ ...Object.fromEntries(persistedDrafts) })
   }, [currentSessionId, currentDraft])
 
+  /**
+   * 点面板外的任何地方 → 立刻收起（锁定中不收）。
+   *
+   * 这正是"点账号/设置"场景的解法：pointerdown 在捕获阶段先收到、先把面板收掉，
+   * 随后账号弹层在干净的界面上展开，不会互相遮挡。点卡片跳会话时，卡片在面板内，
+   * 由 handleOpenSession 负责收。
+   */
+  useEffect(() => {
+    if (!panelOpen || typeof document === 'undefined') return () => {}
+    const onPointerDown = (event: PointerEvent): void => {
+      if (panelLocked) return
+      const rail = railRef.current
+      if (rail !== null && event.target instanceof Node && rail.contains(event.target)) return
+      closePanel()
+    }
+    document.addEventListener('pointerdown', onPointerDown, true)
+    return () => document.removeEventListener('pointerdown', onPointerDown, true)
+  }, [panelOpen])
 
   // 上报"当前查看的对话"：host 判定当前对话回复 → 当/当当（crisp 档），
   // 其他对话 → 另一声音（soft 档"叮"）+ 卡片；同时把当前结论态标记为「正常」。
@@ -692,6 +744,8 @@ export function SessionCardRailCompact({ rpc, openSession: openTarget, useSessio
       style={railStyle}
       onMouseEnter={scheduleHoverOpen}
       onMouseLeave={scheduleLeaveClose}
+      // 有动作就续期：鼠标在胶囊/面板上移动都算"还在看"，别把面板收掉。
+      onPointerMove={keepAlive}
     >
       <button
         type="button"
@@ -699,8 +753,16 @@ export function SessionCardRailCompact({ rpc, openSession: openTarget, useSessio
         title="查看全部会话卡片"
         aria-label="会话卡片统计"
         onClick={() => {
-          if (panelOpen) closePanel()
-          else openPanel()
+          if (panelOpen) {
+            // 显示中点胶囊 = 明确要收起，锁定也一并解除（否则锁定像是卡死了）。
+            if (panelLocked) {
+              panelLocked = false
+              setLocked(false)
+            }
+            closePanel()
+          } else {
+            openPanel()
+          }
         }}
       >
         {/* 空态补位：没有活跃卡片（如刚重启、事件未产生）时，灰点 + 0 占住雷达位置。 */}
@@ -772,6 +834,21 @@ export function SessionCardRailCompact({ rpc, openSession: openTarget, useSessio
           }}
           onMouseLeave={scheduleLeaveClose}
         >
+          <div style={styles.panelHeader}>
+            <span style={styles.panelHint}>{panelItems.length} 个会话</span>
+            <button
+              type="button"
+              style={{ ...styles.lock, ...(locked ? styles.lockOn : {}) }}
+              title={locked ? '取消锁定（恢复自动收起）' : '锁定面板（一直展开，不自动收起）'}
+              aria-pressed={locked}
+              onClick={(event) => {
+                event.stopPropagation()
+                toggleLock()
+              }}
+            >
+              {locked ? '已锁定' : '锁定'}
+            </button>
+          </div>
           {sortedItems.length === 0 ? (
             <div style={styles.empty}>暂无活跃会话</div>
           ) : (
@@ -975,6 +1052,36 @@ const styles: Record<string, React.CSSProperties> = {
     textAlign: 'center',
     fontSize: 12,
     color: '#9aa3b2',
+  },
+  /** 面板顶栏：会话数 + 锁定开关。 */
+  panelHeader: {
+    display: 'flex',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    gap: 8,
+    padding: '6px 10px 0',
+    flex: 'none',
+  },
+  panelHint: {
+    fontSize: 11,
+    color: '#9aa3b2',
+  },
+  /** 锁定按钮（未锁定：描边；已锁定：蓝色高亮）。 */
+  lock: {
+    flexShrink: 0,
+    padding: '3px 8px',
+    borderRadius: 999,
+    border: '1px solid rgba(120,140,180,0.35)',
+    background: 'transparent',
+    color: '#9aa3b2',
+    fontSize: 11,
+    lineHeight: 1,
+    cursor: 'pointer',
+  },
+  lockOn: {
+    borderColor: '#60a5fa',
+    background: 'rgba(96,165,250,0.16)',
+    color: '#93c5fd',
   },
   dot: {
     display: 'inline-block',
