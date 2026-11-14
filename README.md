@@ -45,6 +45,9 @@
 | 8 | Normal | completed and seen | grey |
 
 > Typing in the current session is a normal state and does not trigger the draft reminder; after switching away, the previous session's draft becomes a purple reminder again.
+>
+> The current session's **Running / Intermediate** states still count in the summary (the spinner goes up):
+> "it is running" is a fact, not a reminder. Only reminder states (error / question / draft / to-read / waiting) are suppressed for the session you are looking at.
 > Scope: the client can only read the *current* session's input snapshot (`sessions.binding(id)` is limited to retained sessions), so the purple state covers sessions opened in this tab that were left with a draft.
 
 ## Usage

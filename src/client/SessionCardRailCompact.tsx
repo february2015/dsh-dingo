@@ -199,14 +199,26 @@ export interface SessionCardRailCompactProps {
   variant?: 'footer' | 'overlay'
 }
 
-/** 排序：异常 > 疑问 > 草稿 > 待阅读 > 等待后台/子任务 > 中间输出 > 执行中 > 正常。 */
-function cardRank(
+/**
+ * 排序：异常 > 疑问 > 草稿 > 待阅读 > 等待后台/子任务 > 中间输出 > 执行中 > 正常。
+ *
+ * 当前对话同样不参与"草稿/等待"这两档：那是提醒维度，你正看着它，没必要因为
+ * 自己打字或自己起的后台任务把卡片顶到最前面。执行中的排序照旧。
+ * @param card - 卡片。
+ * @param isDraftFor - 该会话是否有未发送草稿。
+ * @param isWaiting - 该会话是否还有后台/子任务在跑。
+ * @param currentSessionId - 当前打开的会话（不参与提醒类排序）。
+ * @returns 排序权重（越小越靠前）。
+ */
+export function cardRank(
   card: SessionCardView,
   isDraftFor?: (sessionId: string) => boolean,
   isWaiting?: (sessionId: string) => boolean,
+  currentSessionId?: string,
 ): number {
-  const isDraft = isDraftFor?.(card.sessionId) ?? false
-  const waiting = isWaiting?.(card.sessionId) ?? false
+  const isCurrent = card.sessionId === currentSessionId
+  const isDraft = !isCurrent && (isDraftFor?.(card.sessionId) ?? false)
+  const waiting = !isCurrent && (isWaiting?.(card.sessionId) ?? false)
   switch (card.status) {
     case 'error':
       return 0
@@ -223,22 +235,34 @@ function cardRank(
   }
 }
 
-/** 统计互斥归桶：每个会话只进一个桶，按异常 > 疑问 > 草稿 > 待阅读 > 等待 > 中间 > 执行 > 正常。 */
-function summaryBucket(
+/**
+ * 统计互斥归桶：每个会话只进一个桶。
+ *
+ * 规则分两类：
+ * - **提醒类**（异常/疑问/草稿/待阅读/等待后台）：当前对话不参与——你正看着它，
+ *   红/橙/紫/绿这些"去看一眼"的信号没有意义，统一落中性 `normal`。
+ * - **活动类**（执行中/中间输出）：当前对话**照实计入**。"它在跑"是客观状态而不是
+ *   提醒，把它算成已读的话，侧栏底部就永远看不到当前会话在转（本次修正的正是这个）。
+ * @param card - 卡片。
+ * @param currentSessionId - 当前打开的会话。
+ * @param isDraftFor - 该会话是否有未发送草稿。
+ * @param isWaiting - 该会话是否还有后台/子任务在跑。
+ * @returns 所属统计桶。
+ */
+export function summaryBucket(
   card: SessionCardView,
   currentSessionId?: string,
   isDraftFor?: (sessionId: string) => boolean,
   isWaiting?: (sessionId: string) => boolean,
 ): 'error' | 'question' | 'draft' | 'answered' | 'waiting' | 'intermediate' | 'running' | 'normal' | undefined {
-  // 当前对话也计入统计，但统一归入中性「正常」桶，不参与红/橙/紫等提醒闪烁。
-  if (card.sessionId === currentSessionId) return 'normal'
+  const isCurrent = card.sessionId === currentSessionId
+  // 当前对话的非执行态一律归中性：提醒给你看的那些信号你已经看见了。
+  if (isCurrent && card.status !== 'running') return 'normal'
   if (card.status === 'error') return 'error'
   if (card.status === 'question') return 'question'
-  const isDraft = isDraftFor?.(card.sessionId) ?? false
-  if (isDraft) return 'draft'
+  if (!isCurrent && (isDraftFor?.(card.sessionId) ?? false)) return 'draft'
   if (card.status === 'answered') return 'answered'
-  const waiting = isWaiting?.(card.sessionId) ?? false
-  if (waiting && card.status === 'normal') return 'waiting'
+  if (!isCurrent && (isWaiting?.(card.sessionId) ?? false) && card.status === 'normal') return 'waiting'
   if (card.status === 'running') return card.hasIntermediate ? 'intermediate' : 'running'
   if (card.status === 'normal') return 'normal'
   return undefined
@@ -671,9 +695,10 @@ export function SessionCardRailCompact({ rpc, openSession: openTarget, useSessio
 
   if (!showBar) return null
 
-  // 排序：草稿/后台等待/中间输出等 client 侧状态一起参与。
+  // 排序：草稿/后台等待/中间输出等 client 侧状态一起参与（当前对话不吃提醒类排序）。
   const sortedItems = [...panelItems].sort(
-    (a, b) => cardRank(a, hasDraftFor, isWaiting) - cardRank(b, hasDraftFor, isWaiting),
+    (a, b) => cardRank(a, hasDraftFor, isWaiting, currentSessionId)
+      - cardRank(b, hasDraftFor, isWaiting, currentSessionId),
   )
 
   // 互斥统计：每个会话只归入一个最高优先级桶。
