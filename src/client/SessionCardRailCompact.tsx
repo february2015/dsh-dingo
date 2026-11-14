@@ -840,13 +840,14 @@ export function SessionCardRailCompact({ rpc, openSession: openTarget, useSessio
               type="button"
               style={{ ...styles.lock, ...(locked ? styles.lockOn : {}) }}
               title={locked ? '取消锁定（恢复自动收起）' : '锁定面板（一直展开，不自动收起）'}
+              aria-label={locked ? '取消锁定' : '锁定面板'}
               aria-pressed={locked}
               onClick={(event) => {
                 event.stopPropagation()
                 toggleLock()
               }}
             >
-              {locked ? '已锁定' : '锁定'}
+              <PinIcon pinned={locked} />
             </button>
           </div>
           {sortedItems.length === 0 ? (
@@ -869,6 +870,39 @@ export function SessionCardRailCompact({ rpc, openSession: openTarget, useSessio
         </div>
       )}
     </div>
+  )
+}
+
+/**
+ * 图钉图标：未锁定 = 空心灰 + 微微歪着；已锁定 = 实心橙 + 钉正。
+ *
+ * 用内联 SVG 而不是 emoji：📌 在 macOS / Windows 上都是彩色位图，既没法表达
+ * "钉上 / 没钉上"两种状态，也不跟随主题色和 currentColor。
+ * @param pinned - 是否已锁定。
+ */
+function PinIcon({ pinned }: { pinned: boolean }): JSX.Element {
+  return (
+    <svg
+      width="13"
+      height="13"
+      viewBox="0 0 24 24"
+      aria-hidden="true"
+      focusable="false"
+      style={{
+        display: 'block',
+        transform: pinned ? 'none' : 'rotate(-25deg)',
+        transition: 'transform 0.15s ease',
+      }}
+    >
+      <path
+        d="M9 3h6l-1 5 3 3v2H7v-2l3-3-1-5z"
+        fill={pinned ? 'currentColor' : 'none'}
+        stroke="currentColor"
+        strokeWidth="1.7"
+        strokeLinejoin="round"
+      />
+      <path d="M12 13v8" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" />
+    </svg>
   )
 }
 
@@ -1066,29 +1100,32 @@ const styles: Record<string, React.CSSProperties> = {
     fontSize: 11,
     color: '#9aa3b2',
   },
-  /** 锁定按钮（未锁定：描边；已锁定：蓝色高亮）。 */
+  /** 图钉按钮：22×22 圆形按钮，图标颜色由 currentColor 决定。 */
   lock: {
     flexShrink: 0,
-    padding: '3px 8px',
+    display: 'inline-flex',
+    alignItems: 'center',
+    justifyContent: 'center',
+    width: 22,
+    height: 22,
+    padding: 0,
     borderRadius: 999,
     border: '1px solid rgba(120,140,180,0.35)',
     background: 'transparent',
     color: '#9aa3b2',
-    fontSize: 11,
-    lineHeight: 1,
+    lineHeight: 0,
     cursor: 'pointer',
   },
   /**
-   * 已锁定：橙色小按钮。
+   * 已锁定：橙色。
    *
    * 不用蓝色——蓝在本插件里是"执行中"，会误读；橙色是"钉住了 / 需要留意"的语义，
    * 和状态色板里的疑问橙同源（#f59e0b），一眼能看出面板不会自己走。
    */
   lockOn: {
-    borderColor: '#f59e0b',
+    borderColor: 'rgba(245,158,11,0.75)',
     background: 'rgba(245,158,11,0.18)',
-    color: '#fbbf24',
-    fontWeight: 600,
+    color: '#f59e0b',
   },
   dot: {
     display: 'inline-block',

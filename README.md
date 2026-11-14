@@ -65,7 +65,7 @@
   - Different colors per status.
   - Click a card to open that session.
   - `×` removes the card for this round.
-  - A `Lock` toggle sits at the panel's top right (it turns into an orange `Locked` pill while pinned).
+  - A pin button sits at the panel's top right: outline grey = unlocked, filled orange = pinned.
 - **Close rhythm** (while unlocked):
   - leaving the bar/panel closes it after ~2s;
   - 5s without any activity (no pointer movement, no click) closes it;
