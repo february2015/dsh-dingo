@@ -95,8 +95,61 @@ function basename(path?: string): string | undefined {
   return parts.length > 0 ? parts[parts.length - 1] : undefined
 }
 
-/** 跨会话草稿持久化（模块级，避免 header 随会话切换重挂载后丢失）。 */
-const persistedDrafts = new Map<string, string>()
+/**
+ * DSH 的会话草稿存储前缀。
+ *
+ * 客户端把每个会话的输入框内容持久化在 `localStorage['dsh.conversation.<sessionId>']`
+ * 的 `draft` 字段里（键名来自 `@deepseek-ai/dsh-client-ui-conversation` 的 `stores.ts`），
+ * 所以这里**不需要 retain 任何会话**就能读到"所有会话的草稿"，也能跨标签页、跨刷新。
+ */
+const DRAFT_STORE_PREFIX = 'dsh.conversation.'
+
+/**
+ * 从持久化值里挖出草稿正文（兼容三种形状）。
+ *
+ * - 旧版：字符串本身就是正文；
+ * - 现版：`{ draft: { text, references, ... } }`；
+ * - 兜底：任意层级的 `{ draft }` / `{ text }` 递归。
+ * @param value - `JSON.parse` 后的存储值。
+ * @returns 草稿正文（无内容 → 空串）。
+ */
+export function draftTextFrom(value: unknown): string {
+  if (typeof value === 'string') return value
+  if (value === null || typeof value !== 'object') return ''
+  const record = value as Record<string, unknown>
+  if ('draft' in record) return draftTextFrom(record.draft)
+  if (typeof record.text === 'string') return record.text
+  return ''
+}
+
+/**
+ * 读所有会话的草稿（sessionId → 正文）。
+ *
+ * 只回非空草稿；读不到/坏 JSON 一律跳过——草稿是辅助信息，不能因为它把轮询搞挂。
+ * @returns 有内容的草稿表。
+ */
+export function readAllDrafts(): Record<string, string> {
+  const out: Record<string, string> = {}
+  if (typeof localStorage === 'undefined') return out
+  try {
+    for (let i = 0; i < localStorage.length; i += 1) {
+      const key = localStorage.key(i)
+      if (key === null || !key.startsWith(DRAFT_STORE_PREFIX)) continue
+      const raw = localStorage.getItem(key)
+      if (raw === null) continue
+      let text = ''
+      try {
+        text = draftTextFrom(JSON.parse(raw) as unknown)
+      } catch {
+        continue
+      }
+      if (text.trim() !== '') out[key.slice(DRAFT_STORE_PREFIX.length)] = text
+    }
+  } catch {
+    return out
+  }
+  return out
+}
 
 /**
  * 面板锁定态（模块级：宽屏与窄屏两个实例、组件重挂载后都保持）。
@@ -225,11 +278,11 @@ export function cardRank(
     case 'question':
       return 1
     case 'answered':
-      return isDraft ? 2 : 3
+      return 2
     case 'running':
-      return isDraft ? 2 : card.hasIntermediate ? 5 : 6
+      return isDraft ? 3 : card.hasIntermediate ? 5 : 6
     case 'normal':
-      return isDraft ? 2 : waiting ? 4 : 7
+      return isDraft ? 3 : waiting ? 4 : 7
     default:
       return 8
   }
@@ -260,8 +313,9 @@ export function summaryBucket(
   if (isCurrent && card.status !== 'running') return 'normal'
   if (card.status === 'error') return 'error'
   if (card.status === 'question') return 'question'
-  if (!isCurrent && (isDraftFor?.(card.sessionId) ?? false)) return 'draft'
   if (card.status === 'answered') return 'answered'
+  // 草稿挂在"待阅读"之下、"已读/运行中"之上：它是提醒，但弱于"有结论要你看"。
+  if (!isCurrent && (isDraftFor?.(card.sessionId) ?? false)) return 'draft'
   if (!isCurrent && (isWaiting?.(card.sessionId) ?? false) && card.status === 'normal') return 'waiting'
   if (card.status === 'running') return card.hasIntermediate ? 'intermediate' : 'running'
   if (card.status === 'normal') return 'normal'
@@ -346,10 +400,15 @@ export function SessionCardRailCompact({ rpc, openSession: openTarget, useSessio
   const allSessionIds = useSessions?.((s) => s.ids) ?? []
   /** 各会话后台任务（用于识别“等待后台/子任务”状态）。 */
   const jobsBySession = useSessions?.((s) => s.jobsBySession) ?? {}
-  /** 当前会话输入框草稿（root 槽无 useInput，直读输入快照）；用于识别“草稿态”。 */
+  /** 当前会话输入框草稿（root 槽无 useInput，直读输入快照）；其它会话靠 localStorage。 */
   const currentDraft = getDraftBySession?.(String(currentSessionId ?? '')) ?? ''
-  /** 跨会话草稿轮询结果：sessionId → draft。 */
-  const [drafts, setDrafts] = useState<Record<string, string>>({})
+  /**
+   * 所有会话的草稿（sessionId → 正文），每轮 poll 从 localStorage 全量刷新。
+   *
+   * 不再依赖"本标签页打开过"：DSH 自己就把每个会话的输入提到 localStorage，
+   * 所以你在任何会话里留几个字，这里都能立刻看到——这也正是"故意留草稿当 TODO"用法的基础。
+   */
+  const [drafts, setDrafts] = useState<Record<string, string>>(() => readAllDrafts())
 
   /** 判断某会话是否有后台任务/子任务仍在跑（主对话可能已完成）。 */
   const hasBackgroundWork = (sessionId: string): boolean => {
@@ -365,8 +424,12 @@ export function SessionCardRailCompact({ rpc, openSession: openTarget, useSessio
     return jobs.filter((job) => job.status === 'running' || job.status === 'stopping').length
   }
 
-  /** 读取某会话的草稿（当前会话直读输入快照，其它会话走轮询 map）。 */
-  const draftOf = (sessionId: string): string => drafts[sessionId] ?? (sessionId === currentSessionId ? currentDraft : '')
+  /**
+   * 读取某会话的草稿：当前会话优先用活的输入快照（比落盘更即时），
+   * 其它会话用 localStorage 里的持久化值。
+   */
+  const draftOf = (sessionId: string): string =>
+    (sessionId === currentSessionId ? currentDraft : '') || drafts[sessionId] || ''
   const hasDraftFor = (sessionId: string): boolean => draftOf(sessionId).trim().length > 0
 
   /** 判断是否内部会话（TaskSwarm Worker / 子代理），不参与用户卡片/统计。 */
@@ -527,6 +590,8 @@ export function SessionCardRailCompact({ rpc, openSession: openTarget, useSessio
         if (result.ok && result.value !== undefined) {
           const next = result.value as FeedbackSnapshotView
           setSnapshot(next)
+          // 草稿也在同一轮刷新：DSH 把输入落 localStorage，读全量即得"所有会话的草稿"。
+          setDrafts(readAllDrafts())
           const speakingIds = new Set(next.queue.filter((item) => item.state === 'speaking').map((item) => item.id))
           // speaking 项 → 首次见播放提示音 + 记录。
           for (const item of next.queue) {
@@ -576,14 +641,6 @@ export function SessionCardRailCompact({ rpc, openSession: openTarget, useSessio
       if (typeof window !== 'undefined') window.removeEventListener('focus', onWake)
     }
   }, [rpc])
-
-  // 记录当前会话草稿到模块级 Map，切换会话后仍能识别“填了但没发送”的会话。
-  useEffect(() => {
-    if (!currentSessionId) return
-    if (currentDraft.trim()) persistedDrafts.set(currentSessionId, currentDraft)
-    else persistedDrafts.delete(currentSessionId)
-    setDrafts({ ...Object.fromEntries(persistedDrafts) })
-  }, [currentSessionId, currentDraft])
 
   /**
    * 点面板外的任何地方 → 立刻收起（锁定中不收）。
@@ -695,6 +752,10 @@ export function SessionCardRailCompact({ rpc, openSession: openTarget, useSessio
 
   if (!showBar) return null
 
+  /** 某张卡片的统计桶（排序/计数/卡片配色共用同一判据）。 */
+  const bucketOf = (card: SessionCardView) =>
+    summaryBucket(card, currentSessionId, hasDraftFor, isWaiting)
+
   // 排序：草稿/后台等待/中间输出等 client 侧状态一起参与（当前对话不吃提醒类排序）。
   const sortedItems = [...panelItems].sort(
     (a, b) => cardRank(a, hasDraftFor, isWaiting, currentSessionId)
@@ -716,7 +777,7 @@ export function SessionCardRailCompact({ rpc, openSession: openTarget, useSessio
   const intermediate = counts.intermediate
   const otherDraftCount = counts.draft
   const needsTotal = errors + questions + answers
-  const priority = errors > 0 ? 'error' : questions > 0 ? 'question' : otherDraftCount > 0 ? 'draft' : answers > 0 ? 'answered' : undefined
+  const priority = errors > 0 ? 'error' : questions > 0 ? 'question' : answers > 0 ? 'answered' : otherDraftCount > 0 ? 'draft' : undefined
   const priorityCount = priority === 'draft' ? otherDraftCount : needsTotal
 
   const priorityColor = priority === 'error' ? '#ef4444' : priority === 'question' ? '#f59e0b' : priority === 'draft' ? '#a855f7' : priority === 'answered' ? '#22c55e' : undefined
@@ -888,7 +949,8 @@ export function SessionCardRailCompact({ rpc, openSession: openTarget, useSessio
                 card={card}
                 sessionTitles={sessionTitles as Record<string, { displayTitle?: string }> | undefined}
                 isCurrent={card.sessionId === currentSessionId}
-                bucket={summaryBucket(card, currentSessionId, hasDraftFor, isWaiting)}
+                bucket={bucketOf(card)}
+                draftText={bucketOf(card) === 'draft' ? draftOf(card.sessionId) : undefined}
                 dsJobsCount={backgroundJobCount(card.sessionId)}
                 swarmWaveCounts={card.swarmWaveCounts ?? []}
                 onOpen={handleOpenSession}
@@ -941,6 +1003,7 @@ function DetailedCard({
   sessionTitles,
   isCurrent,
   bucket,
+  draftText,
   dsJobsCount,
   swarmWaveCounts,
   onOpen,
@@ -950,6 +1013,8 @@ function DetailedCard({
   sessionTitles?: Record<string, { displayTitle?: string; cwd?: string }>
   isCurrent?: boolean
   bucket?: 'error' | 'question' | 'draft' | 'answered' | 'waiting' | 'intermediate' | 'running' | 'normal'
+  /** 草稿正文（草稿卡上直接显示你留的那几个字，面板即待办清单）。 */
+  draftText?: string
   dsJobsCount?: number
   swarmWaveCounts?: number[]
   onOpen: (card: SessionCardView) => void
@@ -995,6 +1060,10 @@ function DetailedCard({
           {bucket === 'waiting' ? ' ⏳' : ''}
           {bucket === 'intermediate' ? ' ↻' : ''}
         </span>
+        {/* 草稿卡多一行：直接显示你留下的内容，扫一眼就知道这条待办是什么。 */}
+        {bucket === 'draft' && draftText !== undefined && draftText.trim() !== '' && (
+          <span style={styles.draftLine}>✎ {truncate(draftText, 28)}</span>
+        )}
       </span>
       <button
         type="button"
@@ -1331,6 +1400,14 @@ const styles: Record<string, React.CSSProperties> = {
     display: 'inline-flex',
     alignItems: 'center',
     gap: 3,
+  },
+  /** 草稿预览行（紫，配合草稿状态）。 */
+  draftLine: {
+    fontSize: 11,
+    color: '#c084fc',
+    whiteSpace: 'nowrap',
+    overflow: 'hidden',
+    textOverflow: 'ellipsis',
   },
   session: {
     fontSize: 13,

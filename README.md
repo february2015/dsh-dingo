@@ -22,7 +22,7 @@
 - 1:1 persistent session cards
 - Multiple statuses with colors and priority ordering
 - Compact summary pill + hover detail panel
-- Cross-session draft detection
+- Draft detection for every session (usable as a todo list)
 - Background job / subagent / swarm waiting state
 - Current workspace label
 - Background task count display
@@ -37,8 +37,8 @@
 |---|---|---|---|
 | 1 | Error | task failed / abnormal end | red |
 | 2 | Question | needs your answer | orange |
-| 3 | Draft | another session has unsent input | purple |
-| 4 | To Read | completed and needs reading | green |
+| 3 | To Read | completed and needs reading | green |
+| 4 | Draft | any non-current session has unsent input | purple |
 | 5 | Waiting | main done, background/subtasks/swarm still running | teal |
 | 6 | Intermediate | running with partial output | cyan |
 | 7 | Running | running | blue spinner |
@@ -48,7 +48,18 @@
 >
 > The current session's **Running / Intermediate** states still count in the summary (the spinner goes up):
 > "it is running" is a fact, not a reminder. Only reminder states (error / question / draft / to-read / waiting) are suppressed for the session you are looking at.
-> Scope: the client can only read the *current* session's input snapshot (`sessions.binding(id)` is limited to retained sessions), so the purple state covers sessions opened in this tab that were left with a draft.
+> **Every** non-current session with unsent input counts as Draft (purple) — you do not need to have opened it.
+> A draft outranks seen/running but not to-read/question/error.
+>
+> Drafts come from the host's own persistence (`localStorage['dsh.conversation.<sessionId>']`), so they are shared
+> across tabs and survive a page refresh. DSH picks a new web port on every launch (= a new origin), so drafts do not
+> survive a full restart — DSH itself loses them too.
+>
+> **Use it as a todo list**: leave a few words ("TODO later") in a session you are not working on; it stays a purple
+> draft in the panel, and the card shows those words (`✎ TODO later`), until you come back and continue from there.
+>
+> Known limit: the narrow-screen floating pill is mounted by the plugin itself and has no `useSessions`, so
+> draft-only sessions do not appear there yet.
 
 ## Usage
 

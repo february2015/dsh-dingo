@@ -4,7 +4,14 @@
  * - 活动类（执行中/中间输出）照实计入，包括当前对话。
  */
 import { describe, expect, it } from 'vitest'
-import { cardRank, summaryBucket, type SessionCardView, type SessionCardStatus } from '../src/client/SessionCardRailCompact.tsx'
+import {
+  cardRank,
+  draftTextFrom,
+  readAllDrafts,
+  summaryBucket,
+  type SessionCardView,
+  type SessionCardStatus,
+} from '../src/client/SessionCardRailCompact.tsx'
 
 /** 造一张卡片。 */
 function card(sessionId: string, status: SessionCardStatus, extra: Partial<SessionCardView> = {}): SessionCardView {
@@ -57,10 +64,13 @@ describe('summaryBucket：其他对话', () => {
     expect(summaryBucket(card('b', 'normal'), 'cur', noDraft, noWait)).toBe('normal')
   })
 
-  it('草稿优先于待阅读/执行中，等待只对 normal 生效', () => {
+  it('待阅读高于草稿，草稿高于执行中/等待；等待只对 normal 生效', () => {
     const drafting = (id: string): boolean => id === 'b'
-    expect(summaryBucket(card('b', 'answered'), 'cur', drafting, noWait)).toBe('draft')
+    // 已经有结论要你看时，草稿不该把它顶掉
+    expect(summaryBucket(card('b', 'answered'), 'cur', drafting, noWait)).toBe('answered')
+    // 草稿仍强于"正在跑"和"已读"
     expect(summaryBucket(card('b', 'running'), 'cur', drafting, noWait)).toBe('draft')
+    expect(summaryBucket(card('b', 'normal'), 'cur', drafting, noWait)).toBe('draft')
     const waiting = (id: string): boolean => id === 'b'
     expect(summaryBucket(card('b', 'normal'), 'cur', noDraft, waiting)).toBe('waiting')
     // 执行中不会被「等待后台」抢走（它本来就在跑）
@@ -71,9 +81,31 @@ describe('summaryBucket：其他对话', () => {
 describe('cardRank', () => {
   it('当前对话不因草稿/等待被顶到最前', () => {
     const drafting = (id: string): boolean => id === 'cur'
-    expect(cardRank(card('cur', 'answered'), drafting, noWait, 'cur')).toBe(3)
+    expect(cardRank(card('cur', 'answered'), drafting, noWait, 'cur')).toBe(2)
+    expect(cardRank(card('cur', 'normal'), drafting, noWait, 'cur')).toBe(7)
     expect(cardRank(card('cur', 'normal'), noDraft, (id) => id === 'cur', 'cur')).toBe(7)
-    // 同一张卡不是当前对话时，草稿确实会提前
-    expect(cardRank(card('cur', 'answered'), drafting, noWait, 'other')).toBe(2)
+  })
+
+  it('其他对话：待阅读(2) > 草稿(3) > 等待(4)', () => {
+    const drafting = (id: string): boolean => id === 'b'
+    expect(cardRank(card('b', 'answered'), drafting, noWait, 'cur')).toBe(2)
+    expect(cardRank(card('b', 'normal'), drafting, noWait, 'cur')).toBe(3)
+    expect(cardRank(card('b', 'normal'), noDraft, (id) => id === 'b', 'cur')).toBe(4)
+  })
+})
+
+describe('草稿存储解析', () => {
+  it('兼容三种落盘形状', () => {
+    expect(draftTextFrom('纯字符串草稿')).toBe('纯字符串草稿')
+    expect(draftTextFrom({ draft: { text: '现版草稿', references: [] } })).toBe('现版草稿')
+    expect(draftTextFrom({ draft: '旧版草稿' })).toBe('旧版草稿')
+    expect(draftTextFrom({ draft: { text: '', references: [] } })).toBe('')
+    expect(draftTextFrom(null)).toBe('')
+    expect(draftTextFrom(42)).toBe('')
+    expect(draftTextFrom({})).toBe('')
+  })
+
+  it('无 localStorage 时返回空表而不是抛错', () => {
+    expect(readAllDrafts()).toEqual({})
   })
 })
