@@ -141,6 +141,9 @@ function ensureStyles(): void {
   style.textContent = [
     '.lv-fb__full { transition: background 0.15s ease, border-color 0.15s ease; }',
     '.lv-fb__full:hover { filter: brightness(1.15); }',
+    // 图钉按钮：悬停提亮，键盘 Tab 到时有明确焦点环（内联样式做不了 :hover）。
+    '.lv-fb-pin:hover { filter: brightness(1.3); }',
+    '.lv-fb-pin:focus-visible { outline: 2px solid #f59e0b; outline-offset: 1px; }',
     '@keyframes lv-fb-spin { from { transform: rotate(0deg); } to { transform: rotate(360deg); } }',
     '@keyframes lv-fb-pulse { 0%, 100% { opacity: 1; } 50% { opacity: 0.25; } }',
     '@keyframes lv-fb-border-pulse { 0%, 100% { box-shadow: 0 0 4px var(--lv-fb-pulse-color, transparent); } 50% { box-shadow: 0 0 14px var(--lv-fb-pulse-color, transparent); } }',
@@ -838,6 +841,7 @@ export function SessionCardRailCompact({ rpc, openSession: openTarget, useSessio
             <span style={styles.panelHint}>{panelItems.length} 个会话</span>
             <button
               type="button"
+              className="lv-fb-pin"
               style={{ ...styles.lock, ...(locked ? styles.lockOn : {}) }}
               title={locked ? '取消锁定（恢复自动收起）' : '锁定面板（一直展开，不自动收起）'}
               aria-label={locked ? '取消锁定' : '锁定面板'}
@@ -1110,9 +1114,10 @@ const styles: Record<string, React.CSSProperties> = {
     height: 22,
     padding: 0,
     borderRadius: 999,
-    border: '1px solid rgba(120,140,180,0.35)',
-    background: 'transparent',
-    color: '#9aa3b2',
+    // 未锁定也要一眼看见：边框/图标都比原来的淡灰亮一档（深浅两套主题下都清楚）。
+    border: '1px solid rgba(148,163,184,0.85)',
+    background: 'rgba(148,163,184,0.12)',
+    color: '#cbd5e1',
     lineHeight: 0,
     cursor: 'pointer',
   },
