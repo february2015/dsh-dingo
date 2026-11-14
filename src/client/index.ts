@@ -16,7 +16,9 @@ import type {} from '@deepseek-ai/dsh-client-ui-slots'
 // type-only 导入加载 SlotMap 增强
 import type {} from '@deepseek-ai/dsh-client-ui-layout/client'
 import type {} from '@deepseek-ai/dsh-client-ui-sidebar/client'
-import { SessionCardRailCompact, type SessionCardRailCompactProps } from './SessionCardRailCompact.tsx'
+import { createElement } from 'react'
+import { createRoot } from 'react-dom/client'
+import { NarrowFloatingRail, WideFooterRail, type SessionCardRailCompactProps } from './SessionCardRailCompact.tsx'
 import { AutoNameButton, type AutoNameButtonProps } from './AutoNameButton.tsx'
 import { WorkspaceLabel, type WorkspaceLabelProps } from './WorkspaceLabel.tsx'
 import { installDeepLink } from './deep-link.ts'
@@ -37,12 +39,53 @@ export const LOCALE_NS = 'dingo'
 export function apply(ctx: ClientContext): void {
   const connection = ctx.get('connection') as unknown as ConnectionHandle
   const rpc = connection.rpc
-  // 会话跳转服务：卡片点击 → 直接打开对应对话（与侧边栏点击同一入口）。
-  // 注意：open 要求会话在列表内；未知/已删除会话会抛错，这里静默忽略。
-  const sessions = ctx.get('sessions') as {
-    open(id: string): void
-    binding(id: string): { ctx: unknown } | undefined
-  } | undefined
+  /**
+   * 软取客户端服务。
+   *
+   * 关键：**必须每次调用时现取**。apply 时 `uiWorkspace` 常常还没就绪
+   * （实测同一页面里 apply 被调用多次，早期那次 `uiWorkspace` 是 undefined），
+   * 一旦在闭包里把它捕获成 undefined，之后所有点击都变成哑弹。
+   */
+  const safeGet = <T,>(name: string): T | undefined => {
+    try {
+      return ctx.get(name) as T | undefined
+    } catch {
+      return undefined
+    }
+  }
+
+  /**
+   * 点击卡片 → 打开对应会话。
+   *
+   * 0.2 的入口是 `uiWorkspace.openSession(target)`；target 在实现里既接受
+   * sessionId 字符串、也接受 `{ sessionId }` 形状（不同小版本不一致），
+   * 所以两种都试；旧壳兜底 `sessions.open`。全失败才告警（不再静默吞掉）。
+   */
+  const openSession = (sessionId: string): void => {
+    if (!sessionId) return
+    const uiWorkspace = safeGet<{ openSession?: (target: unknown) => void }>('uiWorkspace')
+    if (typeof uiWorkspace?.openSession === 'function') {
+      try {
+        uiWorkspace.openSession(sessionId)
+        return
+      } catch (first) {
+        try {
+          uiWorkspace.openSession({ sessionId })
+          return
+        } catch (second) {
+          // eslint-disable-next-line no-console
+          console.warn('[dsh-dingo] 会话跳转失败：', String(first), String(second))
+        }
+      }
+    }
+    const sessions = safeGet<{ open?: (id: string) => void }>('sessions')
+    try {
+      sessions?.open?.(sessionId)
+    } catch (error) {
+      // eslint-disable-next-line no-console
+      console.warn('[dsh-dingo] sessions.open 失败：', String(error))
+    }
+  }
   // 会话输入服务：用于读取任意会话的未发送草稿。
   const conversation = ctx.get('conversation') as {
     input: {
@@ -52,6 +95,7 @@ export function apply(ctx: ClientContext): void {
   } | undefined
   const getDraftBySession = (sessionId: string): string => {
     try {
+      const sessions = safeGet<{ binding(id: string): { ctx: unknown } | undefined }>('sessions')
       const input = conversation?.input.shell?.(sessionId) ?? conversation?.input.for((sessions?.binding(sessionId) as { ctx: unknown } | undefined)?.ctx as never)
       return input?.state.getSnapshot()?.draft ?? ''
     } catch {
@@ -60,15 +104,10 @@ export function apply(ctx: ClientContext): void {
   }
 
   // 系统通知深链：dingOpen 参数 + 标签页复用（已有 DSH 标签页接管跳转并聚焦）
-  if (sessions !== undefined) {
+  // 条件放宽：0.2 可能没有 `sessions` 服务，导航走 uiWorkspace；深链本身不依赖它。
+  if (true) {
     ctx.effect(() => installDeepLink({
-      openSession: (sessionId: string) => {
-        try {
-          sessions.open(sessionId)
-        } catch {
-          // 会话已不在列表（删除/归档）→ 静默
-        }
-      },
+      openSession: (sessionId: string) => openSession(sessionId),
       channel: typeof BroadcastChannel !== 'undefined' ? new BroadcastChannel('dsh-dingo-deeplink') : undefined,
       closeWindow: () => window.close(),
     }), 'dsh-dingo: deeplink')
@@ -111,16 +150,38 @@ export function apply(ctx: ClientContext): void {
       inject: () => ({
         rpc,
         getDraftBySession,
-        openSession: (sessionId: string) => {
-          try {
-            sessions?.open(sessionId)
-          } catch {
-            // 会话已不在列表（删除/归档）→ 静默；卡片照常关闭
-          }
-        },
+        openSession: (sessionId: string) => openSession(sessionId),
       }),
-    }, SessionCardRailCompact as unknown as (props: SessionCardRailCompactProps) => JSX.Element))
+    }, WideFooterRail as unknown as (props: SessionCardRailCompactProps) => JSX.Element))
   }, 'dsh-dingo: session card rail slot')
+
+  // 窄屏（手机）：直接挂一个固定浮层。
+  //
+  // 为什么不用槽位：侧栏 footer 槽位在窄屏压根不挂载（侧栏是抽屉），而
+  // `shell.overlay` 在不同壳版本里也不一定存在/挂载。这里用 ReactDOM 自己
+  // 建一个 fixed 容器，跟壳的布局解耦，宽窄都稳。
+  // 宽屏时组件内部返回 null（不轮询、不放音），桌面仍由侧栏那个实例负责。
+  ctx.effect(() => {
+    if (typeof document === 'undefined') return () => {}
+    const host = document.createElement('div')
+    host.id = 'dsh-dingo-floating-host'
+    host.style.cssText = 'position:fixed;inset:0;z-index:9000;pointer-events:none'
+    document.body.appendChild(host)
+    const root = createRoot(host)
+    root.render(createElement(NarrowFloatingRail as unknown as (props: SessionCardRailCompactProps) => JSX.Element, {
+      rpc,
+      getDraftBySession,
+      openSession: (sessionId: string) => openSession(sessionId),
+    }))
+    return () => {
+      try {
+        root.unmount()
+      } catch {
+        // 已卸载
+      }
+      host.remove()
+    }
+  }, 'dsh-dingo: floating pill host')
 
   // 2.0 当前工作区标签：放在标准操作之后、Rename 之前。
   ctx.effect(() => {

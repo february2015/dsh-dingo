@@ -1,6 +1,6 @@
 {
   "name": "dsh-dingo",
-  "version": "2.3.0",
+  "version": "2.4.0",
   "description": "DSH 声音提醒 + 对话直达插件：多对话并行时，哪个对话有回复就出声提醒，点右上角卡片直达对应对话；切到别的应用时还有系统级通知（macOS 通知中心 / Windows toast），点击直达。当前对话当/当当（crisp 档），其他对话叮/叮叮（soft 档）。",
   "homepage": "https://github.com/february2015/dsh-dingo",
   "repository": {
@@ -64,7 +64,8 @@
         "@deepseek-ai/dsh-client-ui-conversation",
         "@deepseek-ai/dsh-client-ui-layout",
         "@deepseek-ai/dsh-client-ui-slots",
-        "@deepseek-ai/dsh-client-runtime",
+        "@deepseek-ai/dsh-client-ui-workspace",
+        "@deepseek-ai/dsh-api-session-controller",
         "@deepseek-ai/dsh-client-locale"
       ],
       "platform": "web"
@@ -74,10 +75,10 @@
     }
   },
   "peerDependencies": {
-    "@deepseek-ai/cordis": ">=4.0.1-rc.1 <4.1.0",
-    "@deepseek-ai/dsh-commands": ">=0.1.0-rc.6 <0.2.0",
-    "@deepseek-ai/dsh-session": ">=0.1.0-rc.6 <0.2.0",
-    "@deepseek-ai/dsh-settings": ">=0.1.0-rc.6 <0.2.0",
+    "@deepseek-ai/cordis": ">=4.0.1 <5.0.0",
+    "@deepseek-ai/dsh-commands": ">=0.1.0-rc.6 <0.3.0",
+    "@deepseek-ai/dsh-session": ">=0.1.0-rc.6 <0.3.0",
+    "@deepseek-ai/dsh-settings": ">=0.1.0-rc.6 <0.3.0",
     "@deepseek-ai/schemastery": ">=3.18.1-rc.1 <3.19.0",
     "react": "^18.2.0",
     "react-dom": "^18.2.0"
@@ -120,6 +121,7 @@
     "@deepseek-ai/schemastery": "3.18.1",
     "@types/node": "^24.0.0",
     "@types/react": "~18.3.1",
+    "@types/react-dom": "^18.3.7",
     "react": "^18.2.0",
     "react-dom": "^18.2.0",
     "tsdown": "^0.22.14",

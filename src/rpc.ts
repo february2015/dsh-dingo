@@ -17,6 +17,7 @@ import type { Context } from '@deepseek-ai/cordis';
 import type { ChannelAuthority } from './types.ts';
 import type { FeedbackEngine, FeedbackSnapshot } from './feedback.ts';
 import { autoNameSession } from './auto-name.ts';
+import { registerRpcChannel, type RpcEndpointHandler } from './rpc-route.ts';
 
 /** RPC 校验/业务错误。 */
 export class RpcError extends Error {
@@ -37,14 +38,22 @@ export interface DingoRpcDeps {
   readonly setCurrentSessionId?: (id: string | undefined) => void;
   /** 上报"DSH Web UI 是否前台可见"（决定是否发系统通知）。 */
   readonly setWebVisible?: (visible: boolean) => void;
+  /** 诊断：宿主会话清单长什么样（仅在 dev/排查时提供）。 */
+  readonly debugInventory?: () => Promise<unknown>;
 }
 
-/** 注册 `/dingo` RPC 通道（可逆 effect；unload 时自动卸载）。 */
+/**
+ * 注册 `/dingo` RPC 通道（可逆 effect；unload 时自动卸载）。
+ *
+ * 走插件自注册的前缀路由（见 ./rpc-route.ts）—— 本版 DSH 的
+ * `connection.rpc.handle` 在服务内部 fiber 上解析不到 `webServer`，直接调用必抛。
+ * @param ctx - 宿主上下文（inject 必须含 `webServer`）。
+ * @param deps - 引擎与回调。
+ * @param authority - 信任围栏配置（浏览器鉴权由 connection.requestRejection 兜底，这里只做记录）。
+ */
 export function installDingoRpc(ctx: Context, deps: DingoRpcDeps, authority: ChannelAuthority): void {
-  ctx.effect(() => ctx.connection.rpc.handle('/dingo', async (endpoint, payload, signal) => {
-    if (signal.aborted) {
-      return { ok: false, error: { code: 'cancelled', message: 'request cancelled', details: {} } };
-    }
+  void authority;
+  const handler: RpcEndpointHandler = async (endpoint, payload) => {
     try {
       switch (endpoint) {
         case 'feedback': {
@@ -64,6 +73,12 @@ export function installDingoRpc(ctx: Context, deps: DingoRpcDeps, authority: Cha
           const record = (typeof payload === 'object' && payload !== null ? payload : {}) as Record<string, unknown>;
           deps.setWebVisible?.(record.visible === true);
           return { ok: true, value: { visible: record.visible === true } };
+        }
+        case 'debug': {
+          // 诊断端点：看 sessionController.list() 到底返回了什么
+          // （条数、第一条的字段、projections 里有没有 title）。
+          if (!deps.debugInventory) return { ok: false, error: { code: 'internal', message: 'no debug provider', details: {} } };
+          return { ok: true, value: await deps.debugInventory() };
         }
         case 'auto-name': {
           // 2.0 对话自动命名：header 按钮 / agent 自然语言指令共用同一 host 服务。
@@ -88,7 +103,8 @@ export function installDingoRpc(ctx: Context, deps: DingoRpcDeps, authority: Cha
       const message = error instanceof Error ? error.message : String(error);
       return { ok: false, error: { code: 'internal', message, details: {} } };
     }
-  }, { authority }), 'dsh-dingo: /dingo channel');
+  };
+  registerRpcChannel(ctx, '/dingo', handler, 'dsh-dingo: /dingo channel');
 }
 
 /* ──────────────────────────────────────────────────────────────────────
@@ -165,4 +181,3 @@ function validateFeedbackPayload(payload: unknown): FeedbackRpcRequest {
     ...(typeof record.sessionId === 'string' ? { sessionId: record.sessionId } : {}),
   };
 }
-

@@ -54,9 +54,53 @@ const QUESTION_TONE = /(吗|呢|怎么|怎样|如何|什么|哪|是否|能不能
 const QUESTION_TONE_EN =
   /\b(what|which|who|whom|whose|where|when|why|how)\b|^\s*(are|is|am|do|does|did|can|could|will|would|should|shall|may|might|must|have|has|had|was|were)\b/i;
 
+/** 去掉围栏代码块（里面的问号是示例/日志，不代表在问用户）。 */
+function stripFences(text: string): string {
+  return text.replace(/```[\s\S]*?```/g, '\n\n');
+}
+
+/** 去掉引用块（`> 3. **错误码 200018 具体指什么？**` 这类是"要转发给对方的草稿"）。 */
+function stripQuotes(text: string): string {
+  return text
+    .split('\n')
+    .filter((line) => !/^\s*>/.test(line))
+    .join('\n');
+}
+
+/** 按空行切段（保留段内换行）。 */
+function paragraphs(text: string): string[] {
+  return text
+    .split(/\n\s*\n/)
+    .map((part) => part.trim())
+    .filter((part) => part !== '');
+}
+
+/**
+ * 取出"说给用户听"的收尾段。
+ *
+ * 动机（2026-11-14）：AI 常把**要转发给第三方的提问草稿**整段贴进回复
+ * （"…还是需要单独申请？在哪个菜单？"），旧实现扫全文问号 → 正常结束的
+ * 任务被误判成"等你回答"（橙色 + 叮叮）。真正等你回答的问题只会出现在
+ * 收尾处，所以只看最后一段；最后一段若是"确定了我就开工"这类短收尾，
+ * 再往前看一段。
+ * @param text - 已去掉代码块/引用块的正文。
+ * @returns 用于判定的收尾文本。
+ */
+function closingSegment(text: string): string {
+  const parts = paragraphs(text);
+  if (parts.length === 0) return '';
+  const last = parts[parts.length - 1] ?? '';
+  if (/[？?]/.test(last) || parts.length === 1) return last;
+  // 收尾只是一句"那我就开工了"这类短句时，把上一段一起看
+  if (last.length <= 40 && parts.length >= 2) return `${parts[parts.length - 2] ?? ''}\n${last}`;
+  return last;
+}
+
 /** 回复文本是否"需回答"（含疑问/请求确认特征；中英文）。 */
 export function isQuestionText(text: string): boolean {
-  const t = text.trim();
+  const body = stripQuotes(stripFences(text)).trim();
+  if (body === '') return false;
+  const t = closingSegment(body);
   if (t === '') return false;
 
   // 1) 明确请求动作/决策/确认 → 需回答（不依赖问号）

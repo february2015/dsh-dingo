@@ -37,7 +37,7 @@ function sessionEvent(type: string, data: unknown = {}, extra: Record<string, un
 
 describe('plugin dependencies', () => {
   it('declares host services before feedback, RPC, and rename-tool initialization read them', () => {
-    expect(inject).toEqual(expect.arrayContaining(['connection', 'apiProxy', 'tools']))
+    expect(inject).toEqual(expect.arrayContaining(['connection', 'tools']))
   })
 })
 
@@ -280,5 +280,17 @@ describe('2.0 当前对话完成自动视为已看过', () => {
     await flush()
     const card = engine.cardViews().find((c) => c.sessionId === 'sess-a')
     expect(card?.status).toBe('normal')
+  })
+
+  it('跨工作区会话改名后，卡片标题跟着刷新', () => {
+    const { engine } = build()
+    engine.seedExternalSessions([
+      { sessionId: 's-remote', cwd: '/tmp/proj-a', running: true, updatedAt: Date.now(), sessionTitle: '旧名字' },
+    ])
+    expect(engine.snapshot().cards.find((c) => c.sessionId === 's-remote')?.sessionTitle).toBe('旧名字')
+    engine.seedExternalSessions([
+      { sessionId: 's-remote', cwd: '/tmp/proj-a', running: true, updatedAt: Date.now(), sessionTitle: '新名字' },
+    ])
+    expect(engine.snapshot().cards.find((c) => c.sessionId === 's-remote')?.sessionTitle).toBe('新名字')
   })
 })

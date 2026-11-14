@@ -8,6 +8,7 @@
  * @module dsh-dingo/rename-tool
  */
 import type { Context } from '@deepseek-ai/cordis'
+import { safeService } from './feedback.ts'
 
 /** 注册 `rename_current_session` 工具；无 tools 服务时静默跳过。 */
 export function installRenameTool(ctx: Context): void {
@@ -48,7 +49,7 @@ export function installRenameTool(ctx: Context): void {
     async execute(args: any, exec: any): Promise<{ ok: boolean; title: string }> {
       const sessionId = String(exec?.agent?.session?.id ?? exec?.agent?.id ?? '')
       if (!sessionId) throw new Error('无法确定当前会话')
-      const api = (ctx as unknown as { apiProxy?: { sessions?: { rename(request: { rpcId: unknown; payload: { sessionId: string; title: string } }): Promise<{ result: { ok: boolean; value?: { title: string }; error?: { message?: string } } }> } } }).apiProxy
+      const api = safeService<{ sessions?: { rename(request: { rpcId: unknown; payload: { sessionId: string; title: string } }): Promise<{ result: { ok: boolean; value?: { title: string }; error?: { message?: string } } }> } }>(ctx, 'apiProxy')
       if (!api?.sessions?.rename) throw new Error('重命名服务不可用')
       const result = await api.sessions.rename({
         rpcId: makeRpcId(),

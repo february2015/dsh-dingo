@@ -1,8 +1,14 @@
-# dsh-dingo 2.0
+# dsh-dingo 2.4
 
 [English](README.md) | **中文**
 
-**Ding + Go** —— DSH（DeepSeek Harness）声音提醒 + 会话卡片 + 自动命名插件。
+> **2.4.0（2026-11-13）适配 DSH 0.2.2**
+>
+> - **能装进 0.2 了**：宿主 `apiProxy` 在 0.2 已被拆掉，改为 `ctx.get()` 软取；`/dingo` RPC 改用 `webServer` 作用域上下文注册（无 webserver 的宿主静默跳过）；客户端 inject 去掉已删除的 `dsh-client-runtime`，补 `dsh-client-ui-workspace` / `dsh-api-session-controller`。
+> - **跨项目**：每 5 秒读一次宿主 `sessionController.list()`（全量、活跃度序、与 GUI 侧栏同源），把别的工作区里在跑的 / 10 分钟内刚结束的会话补进药丸（上限 40 张）。
+> - **手机**：视口 ≤ 900px 时药丸从侧栏 footer 切成**右上角固定浮层**（ReactDOM 自建 fixed 容器，不依赖槽位），点开是同一份跨项目卡片列表；点卡片优先走 `uiWorkspace.openSession`，可跨工作区跳转。宽屏/窄屏两个实例互斥挂载，不会重复轮询、重复放提示音。
+> - **标题与跳转**：跨工作区的会话标题不在当前客户端 store 里，宿主改从 `~/.dsh/storages/session_projcache/sessions/<id>.json` 的 `record.rows.title.val` 读（带 mtime 缓存）；点击卡片改为**每次现取** `uiWorkspace`（apply 时它常常还没就绪，闭包捕获会永久失效），并同时尝试 `openSession(id)` / `openSession({sessionId})` 两种形状，全失败会打 `[dsh-dingo]` 告警而不是静默。
+> - **RPC 自注册**：本版 DSH 的 `connection.rpc.handle` 不可用（其 `owner.webServer` 锚定在 connection 服务自己的 fiber 上，永远解析不到 `webServer`，调用必抛 `cannot get property "webServer" without inject`）。改成插件自己 `ctx.webServer.register({kind:'prefix', path:'/dingo'})` 并按 dsh-client-connection 的线上协议手写信封（见 `src/rpc-route.ts`），客户端 `connection.rpc.call` 一行不改。
 
 2.0 把原来的“事件驱动小卡片”升级为**会话 1:1 常驻卡片**：每个活跃对话一张卡片，实时反映状态，并支持自动命名。
 

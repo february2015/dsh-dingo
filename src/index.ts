@@ -23,11 +23,18 @@ import { autoNameSession } from './auto-name.ts';
 import { installRenameTool } from './rename-tool.ts';
 import { sendSystemNotification } from './sysnotify.ts';
 import type { ChannelAuthority } from './types.ts';
+import { sessionTitleFromCache } from './session-titles.ts';
 
 export const name = 'dsh-dingo';
 
-/** 插件初始化前必须可用的宿主服务。 */
-export const inject = ['connection', 'apiProxy', 'tools'] as const;
+/**
+ * 插件初始化前必须可用的宿主服务。
+ *
+ * 0.2 起宿主不再有 `apiProxy`（会话/工作区改由 `sessionController` /
+ * `workspaceController` 提供），所以这里只声明两件确定存在的；其余一律
+ * `ctx.get()` 软取，缺了就走降级路径（cwd basename 兜底、不做跨工作区补卡）。
+ */
+export const inject = ['connection', 'tools', 'webServer'] as const;
 
 /** 设置命名空间（settings UI / profile patch 可覆盖）。 */
 const NS = 'dingo';
@@ -101,6 +108,7 @@ export function apply(ctx: Context, config: unknown): void {
     config: cfg.feedback as unknown as FeedbackInstallOptions['config'],
     audio,
     logger: (message) => logger.info(message),
+    resolveCachedSessionTitle: (sessionId) => sessionTitleFromCache(sessionId),
     resolveTaskswarm: () => {
       const svc = ctx.get('taskswarm') as { getSnapshot(): { batches: Array<{ ownerSessionId?: string; phase: string; lanes?: Array<{ phase: string; wave?: number }> }> } } | undefined
       return svc?.getSnapshot().batches ?? []
@@ -127,9 +135,87 @@ export function apply(ctx: Context, config: unknown): void {
   };
   let feedback: FeedbackEngine = installFeedback(ctx, installOptions);
 
+  // ── 跨工作区补卡（DSH 0.2+） ────────────────────────────────────────
+  // 别的工作区里「你切走之后才起/才结束」的会话不会发事件给当前窗口，
+  // 所以定期拉一次宿主 sessionController.list()（全量、活跃度序、与 GUI 侧栏同源），
+  // 把在跑的 / 刚结束的补进药丸。服务缺席（旧宿主）→ 静默跳过。
+  type SessionControllerLike = {
+    list?(
+      request: unknown,
+      signal?: unknown,
+    ): Promise<{ items?: readonly import('./feedback.ts').ExternalSessionSummary[] }>;
+  };
+  const sessionController = (ctx as unknown as { get?: (name: string) => unknown }).get?.('sessionController') as
+    | SessionControllerLike
+    | undefined;
+  logger.warn('[dingo] cross-project: sessionController=' + (sessionController?.list ? 'yes' : 'no'));
+  if (sessionController?.list) {
+    let stopped = false;
+    let reported = false;
+    let failures = 0;
+    const syncCrossProject = async (): Promise<void> => {
+      let result: { items?: readonly import('./feedback.ts').ExternalSessionSummary[] } | undefined;
+      try {
+        // 这个 Remote 方法的真实签名是 list(request, signal)；部分小版本容忍单参，
+        // 先带 signal 调，抛了再退回单参 —— 之前只传一个参数、异常被吞掉，
+        // 表现就是「有卡片但标题永远补不上」。
+        result = await sessionController.list!({}, new AbortController().signal);
+      } catch (withSignal) {
+        try {
+          result = await sessionController.list!({});
+        } catch (withoutSignal) {
+          failures += 1;
+          if (!reported) {
+            reported = true;
+            logger.warn(
+              '[dingo] sessionController.list 失败：' +
+                String(withSignal) + ' / ' + String(withoutSignal),
+            );
+          }
+          return;
+        }
+      }
+      if (stopped) return;
+      const raw = (result?.items ?? []) as ReadonlyArray<
+        import('./feedback.ts').ExternalSessionSummary & {
+          projections?: { values?: Record<string, unknown> };
+        }
+      >;
+      // 标题两个来源：list 的 'title' 投影（首选，不碰磁盘）→ 投影缓存（兜底）。
+      let fromProjection = 0;
+      let fromCache = 0;
+      const items = raw.map((item) => {
+        const projected = item?.projections?.values?.title;
+        const projectedTitle = typeof projected === 'string' && projected !== '' ? projected : undefined;
+        if (projectedTitle !== undefined) fromProjection += 1;
+        const cached = projectedTitle ?? item.sessionTitle ?? sessionTitleFromCache(item.sessionId);
+        if (projectedTitle === undefined && cached !== undefined) fromCache += 1;
+        return { ...item, projectedTitle, sessionTitle: cached };
+      });
+      feedback.seedExternalSessions(items);
+      if (!reported) {
+        reported = true;
+        logger.warn(
+          '[dingo] cross-project: items=' + String(raw.length) +
+            ' projected=' + String(fromProjection) +
+            ' cache=' + String(fromCache) +
+            ' failures=' + String(failures),
+        );
+      }
+    };
+    void syncCrossProject();
+    const timer = setInterval(() => void syncCrossProject(), 5000);
+    ctx.effect(() => () => {
+      stopped = true;
+      clearInterval(timer);
+    }, 'dsh-dingo: cross-project session inventory');
+  }
+
   // ── `/dingo` RPC 通道 + 斜杠命令 ──
   // 当前对话提醒（当/当当）由 feedback 引擎的 turn/end 处理（own 项只播提示音、
   // 不显示卡片）；这里只把"当前查看的会话"上报给引擎（own 判定用）。
+  // `/dingo` RPC 通道：本版 DSH 的 `connection.rpc.handle` 不可用（见 rpc-route.ts 头注），
+  // 改用插件自注册的 webServer 前缀路由，客户端 `connection.rpc.call` 不用改。
   installDingoRpc(ctx, {
     feedback,
     setCurrentSessionId: (id: string | undefined) => {
@@ -138,8 +224,32 @@ export function apply(ctx: Context, config: unknown): void {
     setWebVisible: (visible: boolean) => {
       webVisible = visible;
     },
+    debugInventory: async () => {
+      const controller = (ctx as unknown as { get?: (name: string) => unknown }).get?.('sessionController') as
+        | { list?(request: unknown, signal?: unknown): Promise<{ items?: readonly Record<string, unknown>[] }> }
+        | undefined;
+      if (!controller?.list) return { controller: false };
+      try {
+        const res = await controller.list({}, new AbortController().signal);
+        const items = res?.items ?? [];
+        const first = items[0] ?? {};
+        const titled = items.filter((item) => {
+          const values = (item as { projections?: { values?: Record<string, unknown> } }).projections?.values;
+          return typeof values?.title === 'string' && values.title !== '';
+        }).length;
+        return {
+          controller: true,
+          count: items.length,
+          titled,
+          firstKeys: Object.keys(first),
+          firstProjectionKeys: Object.keys(((first as { projections?: { values?: Record<string, unknown> } }).projections?.values) ?? {}),
+          firstTitle: ((first as { projections?: { values?: Record<string, unknown> } }).projections?.values?.title) ?? null,
+        };
+      } catch (error) {
+        return { controller: true, error: String(error) };
+      }
+    },
   }, cfg.channelAuthority as ChannelAuthority);
-
   // 对话内自然语言重命名：主 LLM 在当前上下文生成标题后调用本工具写入
   installRenameTool(ctx);
 

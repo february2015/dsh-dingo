@@ -8,6 +8,7 @@
  * @module dsh-dingo/auto-name
  */
 import type { Context } from '@deepseek-ai/cordis'
+import { safeService } from './feedback.ts'
 
 /** 自动命名结果。 */
 export interface AutoNameResult {
@@ -43,7 +44,7 @@ interface HistoryEntryLike {
  * 返回新标题；失败时保持原名并返回错误信息。
  */
 export async function autoNameSession(ctx: Context, sessionId: string): Promise<AutoNameResult> {
-  const api = (ctx as unknown as { apiProxy?: { sessions?: SessionsApiLike } }).apiProxy
+  const api = safeService<{ sessions?: SessionsApiLike }>(ctx, 'apiProxy')
   if (!api?.sessions) {
     return { ok: false, error: '自动命名不可用：缺少 apiProxy.sessions' }
   }

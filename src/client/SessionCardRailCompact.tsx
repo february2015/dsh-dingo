@@ -172,6 +172,13 @@ export interface SessionCardRailCompactProps {
   getDraftBySession?: (sessionId: string) => string
   /** 侧边栏折叠态（false = 56px rail；此时压成紧凑小图标）。 */
   wide?: boolean
+  /**
+   * 挂载位置：
+   * - 'footer'（默认）侧栏底部，宽屏用；
+   * - 'overlay' `shell.overlay` 浮层，窄屏（手机）用 —— 侧栏是抽屉，
+   *   footer 槽位在窄屏根本不会挂载，只能走全局浮层。
+   */
+  variant?: 'footer' | 'overlay'
 }
 
 /** 排序：异常 > 疑问 > 草稿 > 待阅读 > 等待后台/子任务 > 中间输出 > 执行中 > 正常。 */
@@ -220,12 +227,63 @@ function summaryBucket(
 }
 
 /**
+ * 读 DSH 持久化的"当前会话"选择。
+ *
+ * 键名与形状是小版本相关的实现细节（`dsh.sessions.current`，值是
+ * `{ sessionId }` 或包了一层 `{ value: { sessionId } }`），所以这里按
+ * "扫一遍以 sessions.current 结尾的键、再递归找 sessionId"来容错。
+ * @returns 当前会话 id；读不到 → undefined。
+ */
+function readStoredCurrentSession(): string | undefined {
+  try {
+    if (typeof localStorage === 'undefined') return undefined
+    const pick = (raw: string | null): string | undefined => {
+      if (!raw) return undefined
+      const parsed = JSON.parse(raw) as unknown
+      const seen = new Set<unknown>()
+      const dig = (node: unknown, depth: number): string | undefined => {
+        if (depth > 4 || node === null || typeof node !== 'object' || seen.has(node)) return undefined
+        seen.add(node)
+        const record = node as Record<string, unknown>
+        if (typeof record.sessionId === 'string' && record.sessionId !== '') return record.sessionId
+        for (const value of Object.values(record)) {
+          const hit = dig(value, depth + 1)
+          if (hit !== undefined) return hit
+        }
+        return undefined
+      }
+      return dig(parsed, 0)
+    }
+    const direct = pick(localStorage.getItem('dsh.sessions.current'))
+    if (direct !== undefined) return direct
+    for (let i = 0; i < localStorage.length; i += 1) {
+      const key = localStorage.key(i)
+      if (key !== null && key.endsWith('sessions.current')) {
+        const hit = pick(localStorage.getItem(key))
+        if (hit !== undefined) return hit
+      }
+    }
+    return undefined
+  } catch {
+    return undefined
+  }
+}
+
+/**
  * 紧凑统计 Rail：内嵌只显示一个统计胶囊，悬停/点击弹出详细卡片面板。
  */
-export function SessionCardRailCompact({ rpc, openSession: openTarget, useSessions, getDraftBySession, wide }: SessionCardRailCompactProps): JSX.Element | null {
+export function SessionCardRailCompact({ rpc, openSession: openTarget, useSessions, getDraftBySession, wide, variant = 'footer' }: SessionCardRailCompactProps): JSX.Element | null {
   const [snapshot, setSnapshot] = useState<FeedbackSnapshotView | undefined>(undefined)
-  /** 当前打开的对话（框架注入；上报 host 用于"当前对话当/当当"判定）。 */
-  const currentSessionId = useSessions?.((s) => s.current)
+  /**
+   * 当前打开的对话（上报 host 用于"当前对话当/当当"判定 + 卡片上的「当前」标签）。
+   *
+   * 槽位里挂的实例能拿到框架注入的 `useSessions`；但手机上的浮层实例是我们自己
+   * 用 ReactDOM 挂的，拿不到这个 hook —— 那就读 DSH 自己持久化的选中项
+   * （`localStorage` 的 `dsh.sessions.current`，就是侧栏那个"当前会话"），
+   * 再兜底用 host 快照里回传的 activeSessionId。三层任一命中即可。
+   */
+  const storedCurrent = readStoredCurrentSession()
+  const currentSessionId = useSessions?.((s) => s.current) ?? storedCurrent ?? snapshot?.activeSessionId
   /** 各会话 displayTitle（与侧边栏同一数据源；host 标题缺失时卡片兜底显示）。 */
   const sessionTitles = useSessions?.((s) => s.byId)
   const allSessionIds = useSessions?.((s) => s.ids) ?? []
@@ -272,7 +330,72 @@ export function SessionCardRailCompact({ rpc, openSession: openTarget, useSessio
   // Rail 容器与悬浮面板状态
   const railRef = useRef<HTMLDivElement | null>(null)
   const [panelOpen, setPanelOpen] = useState(false)
+  // 窄屏（手机）：DSH 的侧栏是抽屉，药丸挂在 sidebar.footer 里基本看不到 →
+  // 切成右上角固定浮层，点开是同一份跨项目卡片列表。
+  const [narrowViewport, setNarrowViewport] = useState<boolean>(() =>
+    typeof window !== 'undefined' && typeof window.matchMedia === 'function'
+      ? window.matchMedia('(max-width: 900px)').matches
+      : false,
+  )
+  const floating = variant === 'overlay' || narrowViewport
+  useEffect(() => {
+    if (typeof window === 'undefined' || typeof window.matchMedia !== 'function') return () => {}
+    const query = window.matchMedia('(max-width: 900px)')
+    const sync = (): void => setNarrowViewport(query.matches)
+    sync()
+    query.addEventListener('change', sync)
+    return () => query.removeEventListener('change', sync)
+  }, [])
   const closeTimer = useRef<ReturnType<typeof setTimeout> | undefined>(undefined)
+  /** 悬浮开面板的延迟定时器（鼠标只是路过不该弹）。 */
+  const hoverTimer = useRef<ReturnType<typeof setTimeout> | undefined>(undefined)
+  /** 鼠标离开后的延迟关闭定时器（给"移到面板上"留一点时间）。 */
+  const leaveTimer = useRef<ReturnType<typeof setTimeout> | undefined>(undefined)
+
+  /** 鼠标停在胶囊上 ≥700ms 才自动展开；移开就取消。 */
+  const scheduleHoverOpen = (): void => {
+    if (panelOpen) return
+    if (typeof leaveTimer.current !== 'undefined') {
+      clearTimeout(leaveTimer.current)
+      leaveTimer.current = undefined
+    }
+    if (typeof hoverTimer.current !== 'undefined') clearTimeout(hoverTimer.current)
+    hoverTimer.current = setTimeout(() => {
+      hoverTimer.current = undefined
+      openPanel()
+    }, 700)
+  }
+
+  /** 取消待触发的悬浮展开。 */
+  const cancelHoverOpen = (): void => {
+    if (typeof hoverTimer.current !== 'undefined') {
+      clearTimeout(hoverTimer.current)
+      hoverTimer.current = undefined
+    }
+  }
+
+  /**
+   * 鼠标离开后稍等再收起。
+   *
+   * 之前是"离开完全不收"，面板就一直挂在 footer 上方，把「设置 / 账号」
+   * 那一排挡住点不到。现在移开 ~400ms 就收；移到面板上则取消这次收起。
+   */
+  const scheduleLeaveClose = (): void => {
+    cancelHoverOpen()
+    if (typeof leaveTimer.current !== 'undefined') clearTimeout(leaveTimer.current)
+    leaveTimer.current = setTimeout(() => {
+      leaveTimer.current = undefined
+      closePanel()
+    }, 400)
+  }
+
+  /** 取消"离开关闭"（鼠标进到面板里了）。 */
+  const cancelLeaveClose = (): void => {
+    if (typeof leaveTimer.current !== 'undefined') {
+      clearTimeout(leaveTimer.current)
+      leaveTimer.current = undefined
+    }
+  }
 
   /** 打开面板并重置 5 秒自动关闭计时。 */
   const openPanel = (): void => {
@@ -282,6 +405,8 @@ export function SessionCardRailCompact({ rpc, openSession: openTarget, useSessio
 
   /** 关闭面板并清除自动关闭计时。 */
   const closePanel = (): void => {
+    cancelHoverOpen()
+    cancelLeaveClose()
     setPanelOpen(false)
     if (closeTimer.current !== undefined) {
       clearTimeout(closeTimer.current)
@@ -505,8 +630,11 @@ export function SessionCardRailCompact({ rpc, openSession: openTarget, useSessio
       : undefined
 
   const summaryStyle: React.CSSProperties = {
-    // 展开态为独立全宽条（summaryBar）；折叠 rail 时缩回紧凑小胶囊（summaryRail）。
-    ...(wide === false ? styles.summaryRail : styles.summaryBar),
+    // 展开态为独立全宽条（summaryBar）；折叠 rail / 窄屏浮层时缩回紧凑小胶囊。
+    ...(wide === false || floating ? styles.summaryRail : styles.summaryBar),
+    ...(floating
+      ? { boxShadow: '0 6px 20px rgba(0,0,0,0.45)', backdropFilter: 'blur(8px)' }
+      : {}),
     ...(priorityColor
       ? {
           borderColor: priorityColor,
@@ -523,6 +651,19 @@ export function SessionCardRailCompact({ rpc, openSession: openTarget, useSessio
     // 折叠 rail 时 foot 区居中，不右挤。
     width: wide === false ? undefined : 'calc(100% - 4px)',
     marginLeft: wide === false ? 0 : undefined,
+    // 窄屏：脱离侧栏，固定在视口右上角（侧栏抽屉关着也看得见）。
+    ...(floating
+      ? {
+          position: 'absolute' as const,
+          top: 10,
+          right: 10,
+          left: 'auto',
+          zIndex: 9000,
+          width: 'auto',
+          // host 容器是 pointer-events:none 的全屏覆层，药丸自己要把点击收回来
+          pointerEvents: 'auto' as const,
+        }
+      : {}),
   }
 
   return (
@@ -530,17 +671,18 @@ export function SessionCardRailCompact({ rpc, openSession: openTarget, useSessio
       ref={railRef}
       className="lv-fb-rail"
       style={railStyle}
-      onMouseEnter={openPanel}
-      onMouseLeave={() => {
-        // 不立即关闭：5 秒内保持，超时后自动关闭
-      }}
+      onMouseEnter={scheduleHoverOpen}
+      onMouseLeave={scheduleLeaveClose}
     >
       <button
         type="button"
         style={summaryStyle}
         title="查看全部会话卡片"
         aria-label="会话卡片统计"
-        onClick={openPanel}
+        onClick={() => {
+          if (panelOpen) closePanel()
+          else openPanel()
+        }}
       >
         {/* 空态补位：没有活跃卡片（如刚重启、事件未产生）时，灰点 + 0 占住雷达位置。 */}
         {panelItems.length === 0 && (
@@ -586,7 +728,31 @@ export function SessionCardRailCompact({ rpc, openSession: openTarget, useSessio
         // 展开态面板与横条完全等宽（left/right 0 + 去掉 minWidth 撑宽）——
         // 永不越过条的右缘，任何侧边栏宽度下右侧都不会被遮掩/裁切；
         // rail 折叠态锚定小胶囊右缘、固定最小宽。
-        <div style={{ ...styles.panel, ...(wide === false ? { right: 0 } : { left: 0, right: 0, minWidth: 0 }) }} onMouseEnter={resetCloseTimer}>
+        <div
+          style={{
+            ...styles.panel,
+            ...(floating
+              ? {
+                  left: 'auto',
+                  right: 0,
+                  top: '100%',
+                  bottom: 'auto',
+                  marginTop: 6,
+                  marginBottom: 0,
+                  minWidth: 0,
+                  width: 'min(86vw, 320px)',
+                  maxHeight: '60vh',
+                }
+              : wide === false
+                ? { right: 0 }
+                : { left: 0, right: 0, minWidth: 0 }),
+          }}
+          onMouseEnter={() => {
+            cancelLeaveClose()
+            resetCloseTimer()
+          }}
+          onMouseLeave={scheduleLeaveClose}
+        >
           {sortedItems.length === 0 ? (
             <div style={styles.empty}>暂无活跃会话</div>
           ) : (
@@ -743,7 +909,7 @@ const styles: Record<string, React.CSSProperties> = {
     border: '1px solid rgba(120,140,180,0.35)',
     background: 'rgba(24, 26, 32, 0.7)',
     color: '#e8e8e8',
-    fontSize: 11,
+    fontSize: 13,
     lineHeight: 1,
     cursor: 'pointer',
     whiteSpace: 'nowrap',
@@ -769,7 +935,7 @@ const styles: Record<string, React.CSSProperties> = {
     border: '1px solid rgba(120,140,180,0.35)',
     background: 'rgba(24, 26, 32, 0.7)',
     color: '#e8e8e8',
-    fontSize: 10,
+    fontSize: 12,
     lineHeight: 1,
     cursor: 'pointer',
     whiteSpace: 'nowrap',
@@ -777,7 +943,7 @@ const styles: Record<string, React.CSSProperties> = {
   /** 全宽条右端的会话总数提示（展开态；push 到最右避免留白）。 */
   barHint: {
     marginLeft: 'auto',
-    fontSize: 10,
+    fontSize: 12,
     color: '#9aa3b2',
     opacity: 0.75,
     whiteSpace: 'nowrap',
@@ -819,7 +985,7 @@ const styles: Record<string, React.CSSProperties> = {
     flex: 'none',
   },
   count: {
-    fontSize: 11,
+    fontSize: 13,
     fontWeight: 600,
     color: '#e8e8e8',
     lineHeight: 1,
@@ -987,4 +1153,47 @@ const styles: Record<string, React.CSSProperties> = {
     cursor: 'pointer',
     padding: 0,
   },
+}
+
+/** 视口是否窄屏（手机）。 */
+function useNarrowViewport(): boolean {
+  const [narrow, setNarrow] = useState<boolean>(() =>
+    typeof window !== 'undefined' && typeof window.matchMedia === 'function'
+      ? window.matchMedia('(max-width: 900px)').matches
+      : false,
+  )
+  useEffect(() => {
+    if (typeof window === 'undefined' || typeof window.matchMedia !== 'function') return () => {}
+    const query = window.matchMedia('(max-width: 900px)')
+    const sync = (): void => setNarrow(query.matches)
+    sync()
+    query.addEventListener('change', sync)
+    return () => query.removeEventListener('change', sync)
+  }, [])
+  return narrow
+}
+
+/**
+ * 窄屏浮层入口：由 client 入口用 ReactDOM 挂一个 fixed 容器渲染。
+ *
+ * 宽屏直接不渲染 —— 那时药丸由侧栏 footer 的那个实例负责，避免同一个插件
+ * 起两份轮询、放两次提示音。
+ */
+export function NarrowFloatingRail(props: SessionCardRailCompactProps): JSX.Element | null {
+  const narrow = useNarrowViewport()
+  if (!narrow) return null
+  return <SessionCardRailCompact {...props} variant="overlay" />
+}
+
+/**
+ * 宽屏入口：挂在侧栏 `sidebar.footer.action`。
+ *
+ * 窄屏不渲染 —— 侧栏在手机上是被推到画布外的抽屉，footer 实例照样会挂载并
+ * 轮询；两个实例同时跑会重复放提示音、重复上报 spoken。所以这里对称地让
+ * 宽屏实例在窄屏下退出。
+ */
+export function WideFooterRail(props: SessionCardRailCompactProps): JSX.Element | null {
+  const narrow = useNarrowViewport()
+  if (narrow) return null
+  return <SessionCardRailCompact {...props} variant="footer" />
 }

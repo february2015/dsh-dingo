@@ -71,6 +71,32 @@ describe('isQuestionText', () => {
     expect(isQuestionText('The build passed, didn\'t it?')).toBe(false) // 反意疑问
   })
 
+  it('正文里贴的"转发给第三方的提问草稿"不算（2026-11-14 修复橙色误报）', () => {
+    const mall = [
+      '## 要问对方的',
+      '> 3. **错误码 200018 具体指什么？** 有没有错误码对照表？',
+      '> 4. 是开通后自动生成，还是需要单独申请？在哪个菜单？',
+      '',
+      '## 拿到答案后怎么验证',
+      '问完把答复贴给我，我按真实接口把适配器改通，然后跑 2–3 单真实流程。',
+    ].join('\n')
+    expect(isQuestionText(mall)).toBe(false)
+  })
+
+  it('大段分析之后仍以真提问收尾 → 需回答', () => {
+    const body = [
+      '分析如下：接口契约有三处不一致，日志见下。',
+      '',
+      '```text',
+      'POST /api/task/createTask  {}',
+      '→ {"code":100001,"msg":"field taskBid is not set"}',
+      '```',
+      '',
+      '要不要我先把适配器改通？',
+    ].join('\n')
+    expect(isQuestionText(body)).toBe(true)
+  })
+
   it('空文本 → 有回复（不判定）', () => {
     expect(isQuestionText('')).toBe(false)
     expect(isQuestionText('   ')).toBe(false)

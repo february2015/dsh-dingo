@@ -45,6 +45,7 @@
 import type { Context } from '@deepseek-ai/cordis';
 import type { VoiceState } from './types.ts';
 import { isQuestionText } from './question.ts';
+import { sessionTitleFromCache } from './session-titles.ts';
 
 // ─────────────────────────── 类型与常量 ───────────────────────────
 
@@ -226,6 +227,13 @@ export interface FeedbackDeps {
    * `session/title` 投影，懒缓存；不可用 → undefined，模板回落「会话」）。
    */
   readonly resolveSessionTitle?: (sessionId: string) => Promise<string | undefined>;
+  /**
+   * 会话 → 标题（缺省读宿主投影缓存）。
+   *
+   * 用于**所有卡片**的标题兜底：事件卡没有 `session/title` 事件、`apiProxy`
+   * 又在 0.2 被移除，跨工作区卡也不走 seed，所以统一在生成快照时补。
+   */
+  readonly resolveCachedSessionTitle?: (sessionId: string) => string | undefined;
   /** 日志（缺省静默）。 */
   readonly logger?: (message: string) => void;
   /** 新提醒项入队（非去重命中）后回调（host 用它发系统级通知）。 */
@@ -283,6 +291,28 @@ const NO_SUMMARY = '（无摘要）';
 
 // ─────────────────────────── 引擎 ───────────────────────────
 
+/** 宿主 sessionController.list() 的一条摘要（0.2+；跨工作区全量）。 */
+export interface ExternalSessionSummary {
+  readonly sessionId: string;
+  readonly cwd?: string;
+  readonly running?: boolean;
+  readonly blank?: boolean;
+  readonly updatedAt?: number;
+  readonly parentSessionId?: string;
+  readonly origin?: 'subagent';
+  /** 标题（宿主从投影缓存补的；缺省时客户端会用 cwd 兜底）。 */
+  readonly sessionTitle?: string;
+  /**
+   * 直接从 `sessionController.list()` 的 projection 里拿到的标题
+   * （`projections.values.title`，'title' 投影就是 `session/title` 的最新值）。
+   * 这条不依赖文件系统，优先于缓存。
+   */
+  readonly projectedTitle?: string;
+}
+
+/** 跨工作区补卡上限：手机上药丸不能无限长。 */
+const EXTERNAL_CARD_CAP = 40;
+
 /** 2.0 会话卡片内部状态（host 维护）。 */
 interface SessionCardState {
   readonly sessionId: string;
@@ -328,6 +358,14 @@ export class FeedbackEngine {
   private readonly assistantText = new Map<string, string>();
   /** 工作区标题缓存（sessionId → workspaceTitle）。 */
   private readonly workspaceCache = new Map<string, string>();
+  /**
+   * 列表投影里的标题（sessionId → title）。
+   *
+   * 来源是 `sessionController.list()` 每条 summary 的 `projections.values.title`
+   * —— 不碰文件系统，比读投影缓存可靠。seed 每轮都会刷新（包括当前会话，
+   * 即使它不建卡）。
+   */
+  private readonly listTitles = new Map<string, string>();
   /** 客户端上报的「正在听」会话。 */
   private activeSessionId: string | undefined;
   /** 冷却到期/去重窗口到期的重查定时器。 */
@@ -377,6 +415,49 @@ export class FeedbackEngine {
   // ── 2.0 会话卡片 ──
 
   /**
+   * 跨工作区种子（DSH 0.2+）：把宿主 `sessionController.list()` 里「引擎还没见过」
+   * 的会话补进卡片。别的项目在跑的会话事件本来也会经全局 `session/event` 进来，
+   * 但「你切走之后才起/才结束」的那些不会，这里补上。
+   *
+   * 只补有意义的：running 一律补；刚结束 10 分钟内的记成「待阅读」；
+   * 其余留给事件驱动。上限 {@link EXTERNAL_CARD_CAP} 张。
+   * @param items - 宿主会话摘要列表。
+   */
+  seedExternalSessions(items: readonly ExternalSessionSummary[]): void {
+    const now = this.now();
+    const answeredCutoff = now - 10 * 60_000;
+    for (const item of items) {
+      if (!item || typeof item.sessionId !== 'string' || item.sessionId === '') continue;
+      // 标题先记下来（不建卡也要记：当前会话就是被跳过的那个）
+      const projected = item.projectedTitle ?? item.sessionTitle;
+      if (projected !== undefined && projected !== '') this.listTitles.set(item.sessionId, projected);
+      if (item.sessionId === this.activeSessionId) continue;
+      if (item.parentSessionId !== undefined || item.origin === 'subagent' || item.blank === true) continue;
+      const existing = this.cards.get(item.sessionId);
+      if (existing !== undefined) {
+        // 已在清单里：只刷新标题（DSH 自动改名 / 你手动改名后，药丸要跟着变）。
+        // 状态一律以事件流为准，这里不动，避免把「已看过」又翻回未读。
+        if (item.sessionTitle !== undefined && existing.sessionTitle !== item.sessionTitle) {
+          existing.sessionTitle = item.sessionTitle;
+        }
+        continue;
+      }
+      if (!item.running && (typeof item.updatedAt !== 'number' || item.updatedAt < answeredCutoff)) continue;
+      if (this.cards.size >= EXTERNAL_CARD_CAP) break;
+      const status: SessionCardStatus = item.running ? 'running' : 'answered';
+      this.cards.set(item.sessionId, {
+        sessionId: item.sessionId,
+        status,
+        workspaceTitle: item.cwd ? basename(item.cwd) : undefined,
+        sessionTitle: item.sessionTitle ?? this.sessionTitles.get(item.sessionId),
+        createdAt: now,
+        updatedAt: now,
+        conclusionAt: status === 'answered' ? (item.updatedAt ?? now) : undefined,
+      });
+    }
+  }
+
+  /**
    * 会话卡片快照：三组顺序——需关注（answered/question/error）→ 执行中（running）
    * → 已看过（normal）。正常卡片若已完成超过 1 小时则自动隐藏。
    */
@@ -395,6 +476,14 @@ export class FeedbackEngine {
       }
       const counts = [...byWave.entries()].sort((a, b) => a[0] - b[0]).map(([, count]) => count);
       swarmWaveCounts.set(batch.ownerSessionId, counts);
+    }
+    // 标题兜底：任何来源的卡片（事件卡 / seed 卡 / 当前会话卡）都补一次。
+    // 缓存读有 mtime 判断，轮询每 3 秒调一次也不心疼。
+    for (const card of this.cards.values()) {
+      if (card.sessionTitle !== undefined && card.sessionTitle !== '') continue;
+      const fromList = this.listTitles.get(card.sessionId);
+      const cached = fromList ?? this.deps.resolveCachedSessionTitle?.(card.sessionId);
+      if (cached !== undefined && cached !== '') card.sessionTitle = cached;
     }
     const views = [...this.cards.values()]
       .filter((card) => card.status !== 'normal' || now - (card.conclusionAt ?? card.updatedAt) < CARD_HIDE_AFTER_SEEN_MS || swarmOwners.has(card.sessionId))
@@ -1120,6 +1209,13 @@ export interface FeedbackInstallOptions {
   readonly onEnqueue?: (item: AnnouncementView) => void;
   /** TaskSwarm 活跃批次读取器（可选）。 */
   readonly resolveTaskswarm?: () => ReadonlyArray<{ ownerSessionId?: string; phase: string; lanes?: ReadonlyArray<{ phase: string; wave?: number }> }>;
+  /**
+   * 会话 → 标题（同步，读宿主投影缓存）。缺省用 {@link sessionTitleFromCache}。
+   *
+   * 所有卡片的标题兜底都走它：事件卡没有 `session/title` 事件、`apiProxy`
+   * 在 0.2 被移除、seed 又跳过当前会话，只有这里能兜住。
+   */
+  readonly resolveCachedSessionTitle?: (sessionId: string) => string | undefined;
 }
 
 export function installFeedback(
@@ -1134,6 +1230,9 @@ export function installFeedback(
     resolveSessionTitle: options.resolveSessionTitle ?? defaultSessionTitleResolver(ctx),
     onEnqueue: options.onEnqueue,
     resolveTaskswarm: options.resolveTaskswarm,
+    // 之前漏了这条接线：engine 拿到了 deps，但 installFeedback 没把选项透传，
+    // 于是「快照时补标题」永远拿到 undefined —— 手机端就一直显示"未命名对话"。
+    resolveCachedSessionTitle: options.resolveCachedSessionTitle ?? ((sessionId) => sessionTitleFromCache(sessionId)),
   });
   const logger = options.logger ?? (() => {});
 
@@ -1300,6 +1399,33 @@ function fromView(view: AnnouncementView): Announcement {
 
 // ─────────────────────────── 工作区标题解析 ───────────────────────────
 
+/**
+ * 安全取宿主服务。
+ *
+ * Cordis 对「未在 inject 里声明的服务」做属性访问会抛
+ * `cannot get property "apiProxy" without inject`；`ctx.get(name)` 则安静返回
+ * undefined。0.2 起 `apiProxy` 已被拆掉，所以这里一律软取。
+ * @param ctx - 宿主上下文。
+ * @param name - 服务名。
+ * @returns 服务实例，缺席时 undefined。
+ */
+export function safeService<T>(ctx: Context, name: string): T | undefined {
+  const view = ctx as unknown as { get?: (key: string) => unknown } & Record<string, unknown>;
+  if (typeof view.get === 'function') {
+    try {
+      const value = view.get(name);
+      if (value !== undefined) return value as T;
+    } catch {
+      // 未在 inject 声明的服务：get 也会抛，退回属性访问（可能仍抛 → 下面兜住）
+    }
+  }
+  try {
+    return view[name] as T | undefined;
+  } catch {
+    return undefined;
+  }
+}
+
 /** 宿主 apiProxy.workspace.list 的最小形状（结构兼容 @deepseek-ai/dsh-host-apiproxy）。 */
 export interface WorkspaceListApi {
   list(request: { rpcId: unknown; payload: Record<string, never> }): Promise<{
@@ -1313,8 +1439,7 @@ export interface WorkspaceListApi {
 /** 默认工作区标题解析：workspace.list() → sessionId 所在工作区 title；cwd basename 兜底。 */
 export function defaultWorkspaceResolver(
   ctx: Context,
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  apiProxy: { workspace?: WorkspaceListApi } | undefined = (ctx as any).apiProxy,
+  apiProxy: { workspace?: WorkspaceListApi } | undefined = safeService<{ workspace?: WorkspaceListApi }>(ctx, 'apiProxy'),
 ): (sessionId: string, cwd?: string) => Promise<string | undefined> {
   let cache: Map<string, string> | undefined;
   return async (sessionId, cwd) => {
@@ -1362,7 +1487,7 @@ export interface SessionListApi {
 export function defaultSessionTitleResolver(
   ctx: Context,
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  apiProxy: { sessions?: SessionListApi } | undefined = (ctx as any).apiProxy,
+  apiProxy: { sessions?: SessionListApi } | undefined = safeService<{ sessions?: SessionListApi }>(ctx, 'apiProxy'),
 ): (sessionId: string) => Promise<string | undefined> {
   let cache: Map<string, string> | undefined;
   return async (sessionId) => {
