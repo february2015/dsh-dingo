@@ -16,7 +16,14 @@ import type { Context } from '@deepseek-ai/cordis';
 import type {} from '@deepseek-ai/dsh-commands';
 import type {} from '@deepseek-ai/dsh-client-connection';
 import z from '@deepseek-ai/schemastery';
-import { installFeedback, type FeedbackAudio, type FeedbackEngine, type FeedbackInstallOptions, type AnnouncementView } from './feedback.ts';
+import {
+  installFeedback,
+  type AnnouncementView,
+  type ExternalSessionSummary,
+  type FeedbackAudio,
+  type FeedbackEngine,
+  type FeedbackInstallOptions,
+} from './feedback.ts';
 import { installDingoRpc } from './rpc.ts';
 import { registerDingoCommand } from './command.ts';
 import { autoNameSession } from './auto-name.ts';
@@ -24,6 +31,7 @@ import { installRenameTool } from './rename-tool.ts';
 import { sendSystemNotification } from './sysnotify.ts';
 import { safeService } from './feedback.ts';
 import { sessionTitleFromCache } from './session-titles.ts';
+import type { DingoSessionSummary } from './types.ts';
 
 export const name = 'dsh-dingo';
 
@@ -142,11 +150,16 @@ export function apply(ctx: Context, config: unknown): void {
     list?(
       request: unknown,
       signal?: unknown,
-    ): Promise<{ items?: readonly import('./feedback.ts').ExternalSessionSummary[] }>;
+    ): Promise<{ items?: readonly RawSessionLike[] }>;
   };
   const sessionController = (ctx as unknown as { get?: (name: string) => unknown }).get?.('sessionController') as
     | SessionControllerLike
     | undefined;
+  /** 最近一次会话清单（每 5s 刷新），/dingo.sessions 直接返回它。 */
+  let latestSessions: readonly DingoSessionSummary[] = [];
+  let lastSessionSyncAt = 0;
+  /** 客户端来问清单时若缓存过旧（或还没拉过），就现拉一次。 */
+  let listSessionsForClient: () => Promise<readonly DingoSessionSummary[]> = async () => [];
   if (sessionController?.list) {
     let stopped = false;
     let reported = false;
@@ -179,13 +192,19 @@ export function apply(ctx: Context, config: unknown): void {
         }
       >;
       // 标题两个来源：list 的 'title' 投影（首选，不碰磁盘）→ 投影缓存（兜底）。
-      const items = raw.map((item) => {
-        const projected = item?.projections?.values?.title;
-        const projectedTitle = typeof projected === 'string' && projected !== '' ? projected : undefined;
-        const cached = projectedTitle ?? item.sessionTitle ?? sessionTitleFromCache(item.sessionId);
-        return { ...item, projectedTitle, sessionTitle: cached };
-      });
-      feedback.seedExternalSessions(items);
+      const summaries = toSessionSummaries(raw, (sessionId) => sessionTitleFromCache(sessionId));
+      latestSessions = summaries;
+      lastSessionSyncAt = Date.now();
+      // 补卡与 /dingo.sessions 共用同一份数据：标题字段两种形状都喂一份。
+      feedback.seedExternalSessions(summaries.map((item) => ({
+        ...item,
+        sessionTitle: item.title,
+        projectedTitle: item.title,
+      })));
+    };
+    listSessionsForClient = async () => {
+      if (Date.now() - lastSessionSyncAt > 3_000) await syncCrossProject();
+      return latestSessions;
     };
     void syncCrossProject();
     const timer = setInterval(() => void syncCrossProject(), 5000);
@@ -210,6 +229,7 @@ export function apply(ctx: Context, config: unknown): void {
     setWebVisible: (visible: boolean) => {
       webVisible = visible;
     },
+    listSessions: () => listSessionsForClient(),
     debugInventory: async () => {
       const controller = (ctx as unknown as { get?: (name: string) => unknown }).get?.('sessionController') as
         | { list?(request: unknown, signal?: unknown): Promise<{ items?: readonly Record<string, unknown>[] }> }
@@ -281,4 +301,46 @@ export function resolveWebuiBaseUrl(ctx: Context, configured: string): string {
     // 同上
   }
   return 'http://127.0.0.1:3080';
+}
+
+/** `sessionController.list()` 的一条原始摘要（带投影块）。 */
+export type RawSessionLike = ExternalSessionSummary & {
+  readonly projections?: { readonly values?: Readonly<Record<string, unknown>> };
+};
+
+/** 给客户端的清单上限（按宿主返回的活跃度序取前 N 条，避免 RPC 变大）。 */
+export const SESSION_LIST_CAP = 200;
+
+/**
+ * 宿主会话摘要 → `/dingo.sessions` 的紧凑清单。
+ *
+ * 标题优先取 `list()` 里的 `title` 投影（不碰磁盘），其次用回调兜底（投影缓存）。
+ * 客户端拿它做两件事：给没有 `useSessions` 的窄屏浮层补会话，以及给补卡补标题。
+ * @param items - `sessionController.list()` 的条目。
+ * @param cachedTitle - 投影缓存兜底解析。
+ * @returns 紧凑清单（最多 {@link SESSION_LIST_CAP} 条）。
+ */
+export function toSessionSummaries(
+  items: readonly RawSessionLike[],
+  cachedTitle?: (sessionId: string) => string | undefined,
+): DingoSessionSummary[] {
+  const out: DingoSessionSummary[] = [];
+  for (const item of items) {
+    if (!item || typeof item.sessionId !== 'string' || item.sessionId === '') continue;
+    const projected = item.projections?.values?.['title'];
+    const title = typeof projected === 'string' && projected !== ''
+      ? projected
+      : item.projectedTitle ?? item.sessionTitle ?? cachedTitle?.(item.sessionId);
+    out.push({
+      sessionId: item.sessionId,
+      title,
+      cwd: item.cwd,
+      running: item.running === true,
+      updatedAt: item.updatedAt,
+      origin: item.origin,
+      parentSessionId: item.parentSessionId,
+    });
+    if (out.length >= SESSION_LIST_CAP) break;
+  }
+  return out;
 }

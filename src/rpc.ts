@@ -17,6 +17,7 @@ import type { Context } from '@deepseek-ai/cordis';
 import type { FeedbackEngine, FeedbackSnapshot } from './feedback.ts';
 import { autoNameSession } from './auto-name.ts';
 import { registerRpcChannel, type RpcEndpointHandler } from './rpc-route.ts';
+import type { DingoSessionSummary } from './types.ts';
 
 /** RPC 校验/业务错误。 */
 export class RpcError extends Error {
@@ -39,6 +40,13 @@ export interface DingoRpcDeps {
   readonly setWebVisible?: (visible: boolean) => void;
   /** 诊断：宿主会话清单长什么样（仅在 dev/排查时提供）。 */
   readonly debugInventory?: () => Promise<unknown>;
+  /**
+   * 会话清单（给客户端补卡/补标题用）。
+   *
+   * 窄屏浮层胶囊拿不到侧栏槽位的 `useSessions`，只能靠宿主把 `sessionController.list()`
+   * 转成紧凑清单发过来——否则"只有草稿、没有活跃事件"的会话在手机上补不出来。
+   */
+  readonly listSessions?: () => Promise<readonly DingoSessionSummary[]>;
 }
 
 /**
@@ -71,6 +79,11 @@ export function installDingoRpc(ctx: Context, deps: DingoRpcDeps): void {
           const record = (typeof payload === 'object' && payload !== null ? payload : {}) as Record<string, unknown>;
           deps.setWebVisible?.(record.visible === true);
           return { ok: true, value: { visible: record.visible === true } };
+        }
+        case 'sessions': {
+          // 客户端（尤其窄屏浮层）补会话清单：宿主缓存 5s 一份，过旧就现拉。
+          const items = deps.listSessions ? await deps.listSessions() : [];
+          return { ok: true, value: { items } };
         }
         case 'debug': {
           // 诊断端点：看 sessionController.list() 到底返回了什么

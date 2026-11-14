@@ -43,3 +43,33 @@ export type NoticeLevel = 'reply' | 'confirm';
 
 /** 提示音标识（与 client tones.ts 对应）。 */
 export type ToneId = 'ding' | 'ding-ding' | 'dong' | 'none';
+
+/**
+ * `/dingo.sessions` 返回的一条会话摘要（host → client 补卡用）。
+ *
+ * 存在的理由：窄屏浮层胶囊是插件自己用 ReactDOM 挂的，拿不到侧栏槽位的
+ * `useSessions`，于是"只有草稿、没有活跃事件"的会话在手机上补不出来。
+ * 宿主本来每 5 秒就会调一次 `sessionController.list()`，顺手把它转成这份紧凑清单
+ * 暴露给客户端即可，零额外成本。
+ */
+export interface DingoSessionSummary {
+  /** 会话 id。 */
+  readonly sessionId: string;
+  /** 标题（`title` 投影优先，其次投影缓存）。 */
+  readonly title?: string;
+  /** 工作目录（客户端取其 basename 当工作区名）。 */
+  readonly cwd?: string;
+  /** 宿主判定是否正在执行。 */
+  readonly running?: boolean;
+  /** 最后活跃时间（epoch ms）。 */
+  readonly updatedAt?: number;
+  /** 子代理会话标记（客户端要过滤掉）。 */
+  readonly origin?: 'subagent';
+  /** 直接父会话（子代理的归属）。 */
+  readonly parentSessionId?: string;
+}
+
+/** `/dingo.sessions` 响应。 */
+export interface DingoSessionList {
+  readonly items: readonly DingoSessionSummary[];
+}

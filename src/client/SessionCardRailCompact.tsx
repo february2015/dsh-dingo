@@ -17,6 +17,7 @@ import { useEffect, useRef, useState } from 'react'
 import type { SessionListState } from '@deepseek-ai/dsh-client-runtime/client'
 import type { RpcCall } from './rpc.ts'
 import { resolveToneUrl, type ToneStyle } from './tones.ts'
+import type { DingoSessionSummary } from '../types.ts'
 
 /** `/dingo.feedback` 返回的插播项视图（host 形状的子集，声音层继续用）。 */
 export interface AnnouncementView {
@@ -409,6 +410,13 @@ export function SessionCardRailCompact({ rpc, openSession: openTarget, useSessio
    * 所以你在任何会话里留几个字，这里都能立刻看到——这也正是"故意留草稿当 TODO"用法的基础。
    */
   const [drafts, setDrafts] = useState<Record<string, string>>(() => readAllDrafts())
+  /**
+   * 宿主会话清单（`/dingo.sessions`）。
+   *
+   * 侧栏槽位有 `useSessions`，但窄屏浮层胶囊是插件自己挂的 ReactDOM 实例，拿不到——
+   * 没有这份清单，手机上"只有草稿、没有活跃事件"的会话就补不出来，标题也只剩「未命名」。
+   */
+  const [hostSessions, setHostSessions] = useState<readonly DingoSessionSummary[]>([])
 
   /** 判断某会话是否有后台任务/子任务仍在跑（主对话可能已完成）。 */
   const hasBackgroundWork = (sessionId: string): boolean => {
@@ -432,13 +440,8 @@ export function SessionCardRailCompact({ rpc, openSession: openTarget, useSessio
     (sessionId === currentSessionId ? currentDraft : '') || drafts[sessionId] || ''
   const hasDraftFor = (sessionId: string): boolean => draftOf(sessionId).trim().length > 0
 
-  /** 判断是否内部会话（TaskSwarm Worker / 子代理），不参与用户卡片/统计。 */
-  const isInternalSession = (sessionId: string): boolean => {
-    const info = ((sessionTitles ?? {}) as Record<string, { origin?: string; cwd?: string }>)[sessionId]
-    return info?.origin === 'subagent'
-      || (typeof info?.cwd === 'string' && /[\\/]\.taskswarm[\\/]worktrees[\\/]/.test(info.cwd))
-  }
-
+  /** poll 轮次计数（决定多久拉一次会话清单）。 */
+  const pollTick = useRef(0)
   // 已播放过提示音的 speaking 项（每 id 一次）
   const tonePlayed = useRef(new Set<string>())
   // 见过 speaking 的项（speaking → 消失 的过渡只报一次 spoken）
@@ -584,6 +587,17 @@ export function SessionCardRailCompact({ rpc, openSession: openTarget, useSessio
 
     async function poll(): Promise<void> {
       if (stopped) return
+      // 会话清单变化慢（宿主 5s 一份），每 5 轮拉一次即可，省 RPC。
+      pollTick.current += 1
+      if (pollTick.current === 1 || pollTick.current % 5 === 0) {
+        void rpc.call('/dingo', 'sessions', {})
+          .then((response) => {
+            if (stopped || !response.ok || response.value === undefined) return
+            const value = response.value as { items?: readonly DingoSessionSummary[] }
+            if (Array.isArray(value.items)) setHostSessions(value.items)
+          })
+          .catch(() => {})
+      }
       try {
         const result = await rpc.call('/dingo', 'feedback', { action: 'announcements' })
         if (stopped) return
@@ -680,18 +694,44 @@ export function SessionCardRailCompact({ rpc, openSession: openTarget, useSessio
   // 补卡：host 卡片之外，客户端从会话快照补出「仍在活跃」的会话——
   // 执行中（running）、待你回答（pendingInteraction）、已完成未读（completed）、
   // 草稿、后台任务/子任务。重启后 host 卡片为空时，靠这层补卡让雷达立即可见。
-  const summaries = (sessionTitles ?? {}) as Record<string, {
+  /** 会话信息：客户端 store（侧栏同源）优先，宿主 `/dingo.sessions` 兜底（浮层实例只有后者）。 */
+  type SessionInfo = {
     displayTitle?: string
     cwd?: string
     origin?: string
     running?: boolean
     pendingInteraction?: 'approval' | 'plan-review' | 'question'
     completed?: boolean
-  }>
+  }
+  const summaries = (sessionTitles ?? {}) as Record<string, SessionInfo>
+  const hostById = new Map(hostSessions.map((item) => [item.sessionId, item]))
+  const sessionInfoOf = (sessionId: string): SessionInfo | undefined => {
+    const local = summaries[sessionId]
+    const host = hostById.get(sessionId)
+    if (local === undefined && host === undefined) return undefined
+    return {
+      displayTitle: local?.displayTitle ?? host?.title,
+      cwd: local?.cwd ?? host?.cwd,
+      origin: local?.origin ?? host?.origin,
+      running: local?.running ?? host?.running,
+      pendingInteraction: local?.pendingInteraction,
+      completed: local?.completed,
+    }
+  }
+  /** 判断是否内部会话（TaskSwarm Worker / 子代理），不参与用户卡片/统计。 */
+  const isInternalSession = (sessionId: string): boolean => {
+    const info = sessionInfoOf(sessionId)
+    return info?.origin === 'subagent'
+      || (typeof info?.cwd === 'string' && /[\\/]\.taskswarm[\\/]worktrees[\\/]/.test(info.cwd))
+  }
+
+  /** 候选会话 = 客户端列表 ∪ 宿主清单（去重；浮层实例的客户端列表为空）。 */
+  const sessionIds = allSessionIds.length > 0
+    ? [...new Set([...allSessionIds.map(String), ...hostSessions.map((item) => item.sessionId)])]
+    : hostSessions.map((item) => item.sessionId)
   const syntheticCards: SessionCardView[] = []
-  for (const id of allSessionIds) {
-    const sid = String(id)
-    const info = summaries[sid]
+  for (const sid of sessionIds) {
+    const info = sessionInfoOf(sid)
     // 子代理/Worker 会话不进入卡片清单。
     if (isInternalSession(sid)) continue
     if (items.some((card) => card.sessionId === sid)) continue
@@ -720,6 +760,13 @@ export function SessionCardRailCompact({ rpc, openSession: openTarget, useSessio
       updatedAt: Date.now(),
     })
   }
+  /** 卡片标题/工作区兜底表：客户端 store 优先，宿主清单补齐。 */
+  const viewSessionInfo: Record<string, { displayTitle?: string; cwd?: string }> = { ...(sessionTitles ?? {}) }
+  for (const host of hostSessions) {
+    if (viewSessionInfo[host.sessionId] !== undefined) continue
+    viewSessionInfo[host.sessionId] = { displayTitle: host.title, cwd: host.cwd }
+  }
+
   // 防御性去重：避免同一个会话因 host 卡片 + 客户端补卡出现两张。
   const seenPanel = new Set<string>()
   const panelItems = [...items, ...syntheticCards].filter((card) => {
@@ -947,7 +994,7 @@ export function SessionCardRailCompact({ rpc, openSession: openTarget, useSessio
               <DetailedCard
                 key={card.sessionId}
                 card={card}
-                sessionTitles={sessionTitles as Record<string, { displayTitle?: string }> | undefined}
+                sessionTitles={viewSessionInfo as Record<string, { displayTitle?: string }> | undefined}
                 isCurrent={card.sessionId === currentSessionId}
                 bucket={bucketOf(card)}
                 draftText={bucketOf(card) === 'draft' ? draftOf(card.sessionId) : undefined}

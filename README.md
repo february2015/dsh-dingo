@@ -58,8 +58,9 @@
 > **Use it as a todo list**: leave a few words ("TODO later") in a session you are not working on; it stays a purple
 > draft in the panel, and the card shows those words (`✎ TODO later`), until you come back and continue from there.
 >
-> Known limit: the narrow-screen floating pill is mounted by the plugin itself and has no `useSessions`, so
-> draft-only sessions do not appear there yet.
+> The narrow-screen floating pill is mounted by the plugin itself and has no `useSessions`; the host therefore also
+> serves `/dingo.sessions` (a compact `sessionController.list()` view, refreshed every 5s, capped at 200 entries), so
+> draft-only sessions and their titles show up on the phone as well.
 
 ## Usage
 
