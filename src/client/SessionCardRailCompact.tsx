@@ -45,6 +45,77 @@ const PANEL_IDLE_CLOSE_MS = 5_000
 /** 鼠标离开（胶囊与面板都出去了）后延迟关闭（ms）：给"移回面板"留一点时间。 */
 const PANEL_LEAVE_CLOSE_MS = 2_000
 
+/** 手机浮动胶囊位置存储键（localStorage；同 origin 内跨刷新保留）。 */
+const PILL_POS_KEY = 'dsh-dingo.pill-pos'
+
+/** 拖拽判定阈值（px）：位移小于它算"点击"，不算拖拽。 */
+const DRAG_THRESHOLD_PX = 6
+
+/**
+ * 手机浮层默认位置：与对话头部的 view tab 行（「对话 / 轨迹」那一排）同高、右侧留 10px。
+ *
+ * 数值来自 DSH 的会话头部几何：`.header` 高 76px = 10px 上内边距 + 标题行 + 10px 间距
+ * + 25px 的 view 行，所以那行从 y≈51 开始；药丸 24px 高，居中即 52。
+ * 想上下挪就改这里。
+ */
+const PILL_DEFAULT_TOP = 52
+const PILL_DEFAULT_RIGHT = 10
+
+/** 胶囊在视口里的位置（左上角坐标，px）。 */
+export interface PillPosition {
+  readonly x: number
+  readonly y: number
+}
+
+/**
+ * 把胶囊位置夹进视口（四边各留 margin）。
+ * @param pos - 目标位置。
+ * @param viewport - 视口尺寸。
+ * @param size - 胶囊自身尺寸。
+ * @param margin - 边缘留白（px）。
+ * @returns 合法位置。
+ */
+export function clampPillPosition(
+  pos: { x: number; y: number },
+  viewport: { width: number; height: number },
+  size: { width: number; height: number },
+  margin = 4,
+): PillPosition {
+  const maxX = Math.max(margin, viewport.width - size.width - margin)
+  const maxY = Math.max(margin, viewport.height - size.height - margin)
+  return {
+    x: Math.min(Math.max(pos.x, margin), maxX),
+    y: Math.min(Math.max(pos.y, margin), maxY),
+  }
+}
+
+/** 读上次拖到的位置（无记录/坏数据 → undefined = 默认右上角）。 */
+export function readStoredPillPosition(): PillPosition | undefined {
+  if (typeof localStorage === 'undefined') return undefined
+  try {
+    const raw = localStorage.getItem(PILL_POS_KEY)
+    if (raw === null) return undefined
+    const parsed: unknown = JSON.parse(raw)
+    if (parsed === null || typeof parsed !== 'object') return undefined
+    const record = parsed as Record<string, unknown>
+    return typeof record.x === 'number' && typeof record.y === 'number' && Number.isFinite(record.x) && Number.isFinite(record.y)
+      ? { x: record.x, y: record.y }
+      : undefined
+  } catch {
+    return undefined
+  }
+}
+
+/** 存下胶囊位置（存储不可用时静默忽略）。 */
+function storePillPosition(pos: PillPosition): void {
+  if (typeof localStorage === 'undefined') return
+  try {
+    localStorage.setItem(PILL_POS_KEY, JSON.stringify(pos))
+  } catch {
+    // 配额/隐私模式：位置不持久化而已，不影响功能
+  }
+}
+
 /** 2.0 会话卡片状态。 */
 export type SessionCardStatus = 'running' | 'answered' | 'question' | 'error' | 'normal'
 
@@ -461,6 +532,100 @@ export function SessionCardRailCompact({ rpc, openSession: openTarget, useSessio
       : false,
   )
   const floating = variant === 'overlay' || narrowViewport
+  /** 药丸位置（undefined = 默认右上角）。手机上拖过之后用绝对坐标。 */
+  const [pillPos, setPillPos] = useState<PillPosition | undefined>(() => readStoredPillPosition())
+  /** 拖拽过程状态（pointerId / 起点 / 起点位置 / 是否已越过阈值 / 最新位置）。 */
+  const dragRef = useRef<{
+    pointerId: number
+    startX: number
+    startY: number
+    baseX: number
+    baseY: number
+    moved: boolean
+    latest?: PillPosition
+  } | undefined>(undefined)
+  /** 刚拖完的那一次 click 要吞掉（否则拖一下就把面板开了/关了）。 */
+  const draggedRef = useRef(false)
+
+  /** 药丸尺寸与视口（拖拽/夹取用）。 */
+  const pillViewport = (): { viewport: { width: number; height: number }; size: { width: number; height: number } } => {
+    const rect = railRef.current?.getBoundingClientRect()
+    return {
+      viewport: {
+        width: typeof window === 'undefined' ? 0 : window.innerWidth,
+        height: typeof window === 'undefined' ? 0 : window.innerHeight,
+      },
+      size: { width: rect?.width ?? 0, height: rect?.height ?? 0 },
+    }
+  }
+
+  /** 开始拖拽：记住指针与起始坐标，并捕获指针（之后 move/up 都回到这个元素）。 */
+  const handlePillPointerDown = (event: React.PointerEvent<HTMLButtonElement>): void => {
+    if (!floating) return
+    const rect = railRef.current?.getBoundingClientRect()
+    if (rect === undefined) return
+    dragRef.current = {
+      pointerId: event.pointerId,
+      startX: event.clientX,
+      startY: event.clientY,
+      baseX: rect.left,
+      baseY: rect.top,
+      moved: false,
+    }
+    try {
+      event.currentTarget.setPointerCapture(event.pointerId)
+    } catch {
+      // 某些浏览器对非活跃指针会抛：不影响后续 move（没有捕获时靠指针仍在元素上）
+    }
+  }
+
+  /** 拖动中：越过阈值才算拖拽，随后按位移更新位置（夹在视口内）。 */
+  const handlePillPointerMove = (event: React.PointerEvent<HTMLButtonElement>): void => {
+    const drag = dragRef.current
+    if (drag === undefined || drag.pointerId !== event.pointerId) return
+    const dx = event.clientX - drag.startX
+    const dy = event.clientY - drag.startY
+    if (!drag.moved && Math.abs(dx) + Math.abs(dy) < DRAG_THRESHOLD_PX) return
+    if (!drag.moved) {
+      drag.moved = true
+      // 拖动时不希望面板跟着一起飞：先收掉。
+      closePanel()
+    }
+    const { viewport, size } = pillViewport()
+    const next = clampPillPosition({ x: drag.baseX + dx, y: drag.baseY + dy }, viewport, size)
+    drag.latest = next
+    setPillPos(next)
+  }
+
+  /** 结束拖拽：落盘位置；若是拖拽则吞掉随后的 click。 */
+  const handlePillPointerUp = (event: React.PointerEvent<HTMLButtonElement>): void => {
+    const drag = dragRef.current
+    if (drag === undefined) return
+    dragRef.current = undefined
+    try {
+      event.currentTarget.releasePointerCapture(event.pointerId)
+    } catch {
+      // 已释放
+    }
+    if (!drag.moved) return
+    draggedRef.current = true
+    if (drag.latest !== undefined) storePillPosition(drag.latest)
+  }
+
+  // 视口变化（旋转/软键盘）时把药丸夹回可见区域。
+  useEffect(() => {
+    if (!floating || typeof window === 'undefined') return () => {}
+    const onResize = (): void => {
+      setPillPos((prev) => {
+        if (prev === undefined) return prev
+        const { viewport, size } = pillViewport()
+        return clampPillPosition(prev, viewport, size)
+      })
+    }
+    window.addEventListener('resize', onResize)
+    return () => window.removeEventListener('resize', onResize)
+  }, [floating])
+
   useEffect(() => {
     if (typeof window === 'undefined' || typeof window.matchMedia !== 'function') return () => {}
     const query = window.matchMedia('(max-width: 900px)')
@@ -836,11 +1001,26 @@ export function SessionCardRailCompact({ rpc, openSession: openTarget, useSessio
       ? 'lv-fb-breathe 1.8s ease-in-out infinite, lv-fb-border-pulse 1s ease-in-out infinite'
       : undefined
 
+  // 浮层面板朝向：拖到右半边就右对齐，拖到下半屏就向上弹（否则会跑出屏幕）。
+  const viewportWidth = typeof window === 'undefined' ? 0 : window.innerWidth
+  const viewportHeight = typeof window === 'undefined' ? 0 : window.innerHeight
+  const pillOnRightHalf = pillPos === undefined ? true : pillPos.x >= viewportWidth / 2
+  const pillOnBottomHalf = pillPos === undefined ? false : pillPos.y >= viewportHeight / 2
+
   const summaryStyle: React.CSSProperties = {
     // 展开态为独立全宽条（summaryBar）；折叠 rail / 窄屏浮层时缩回紧凑小胶囊。
     ...(wide === false || floating ? styles.summaryRail : styles.summaryBar),
     ...(floating
-      ? { boxShadow: '0 6px 20px rgba(0,0,0,0.45)', backdropFilter: 'blur(8px)' }
+      ? {
+          boxShadow: '0 6px 20px rgba(0,0,0,0.45)',
+          backdropFilter: 'blur(8px)',
+          // 触摸拖拽必需：否则 pointermove 会被浏览器当成滚动/缩放吃掉。
+          touchAction: 'none',
+          userSelect: 'none',
+          WebkitUserSelect: 'none',
+          WebkitTouchCallout: 'none',
+          cursor: 'grab',
+        }
       : {}),
     ...(priorityColor
       ? {
@@ -855,18 +1035,17 @@ export function SessionCardRailCompact({ rpc, openSession: openTarget, useSessio
   const railStyle: React.CSSProperties = {
     ...styles.rail,
     // 展开态占满整行（配合 flexWrap 换行），右缘只留 4px 空隙防贴边；
-    // 折叠 rail 时 foot 区居中，不右挤。
-    width: wide === false ? undefined : 'calc(100% - 4px)',
+    // 折叠 rail 时 foot 区居中，不右挤；浮层则按自身内容宽。
+    width: floating ? 'auto' : wide === false ? undefined : 'calc(100% - 4px)',
     marginLeft: wide === false ? 0 : undefined,
-    // 窄屏：脱离侧栏，固定在视口右上角（侧栏抽屉关着也看得见）。
+    // 窄屏：脱离侧栏，浮在视口上（默认右上角，拖过之后按落点）。
     ...(floating
       ? {
           position: 'absolute' as const,
-          top: 10,
-          right: 10,
-          left: 'auto',
+          ...(pillPos === undefined
+            ? { top: PILL_DEFAULT_TOP, right: PILL_DEFAULT_RIGHT, left: 'auto' }
+            : { top: pillPos.y, left: pillPos.x, right: 'auto' }),
           zIndex: 9000,
-          width: 'auto',
           // host 容器是 pointer-events:none 的全屏覆层，药丸自己要把点击收回来
           pointerEvents: 'auto' as const,
         }
@@ -886,9 +1065,19 @@ export function SessionCardRailCompact({ rpc, openSession: openTarget, useSessio
       <button
         type="button"
         style={summaryStyle}
-        title="查看全部会话卡片"
+        title={floating ? '拖动可移动位置；点击查看会话卡片' : '查看全部会话卡片'}
         aria-label="会话卡片统计"
+        // 手机上按住可拖动：pointer 事件 + touch-action:none（见 summaryStyle）。
+        onPointerDown={floating ? handlePillPointerDown : undefined}
+        onPointerMove={floating ? handlePillPointerMove : undefined}
+        onPointerUp={floating ? handlePillPointerUp : undefined}
+        onPointerCancel={floating ? handlePillPointerUp : undefined}
         onClick={() => {
+          // 刚拖完的那次 click 不算点击（否则拖一下就把面板开关了）。
+          if (draggedRef.current) {
+            draggedRef.current = false
+            return
+          }
           if (panelOpen) {
             // 显示中点胶囊 = 明确要收起，锁定也一并解除（否则锁定像是卡死了）。
             if (panelLocked) {
@@ -950,12 +1139,12 @@ export function SessionCardRailCompact({ rpc, openSession: openTarget, useSessio
             ...styles.panel,
             ...(floating
               ? {
-                  left: 'auto',
-                  right: 0,
-                  top: '100%',
-                  bottom: 'auto',
-                  marginTop: 6,
-                  marginBottom: 0,
+                  // 拖到左半边就左对齐、拖到下半屏就向上弹，避免面板跑出屏幕。
+                  left: pillOnRightHalf ? 'auto' : 0,
+                  right: pillOnRightHalf ? 0 : 'auto',
+                  ...(pillOnBottomHalf
+                    ? { top: 'auto', bottom: '100%', marginTop: 0, marginBottom: 6 }
+                    : { top: '100%', bottom: 'auto', marginTop: 6, marginBottom: 0 }),
                   minWidth: 0,
                   width: 'min(86vw, 320px)',
                   maxHeight: '60vh',

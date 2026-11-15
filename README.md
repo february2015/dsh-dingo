@@ -58,7 +58,11 @@
 > **Use it as a todo list**: leave a few words ("TODO later") in a session you are not working on; it stays a purple
 > draft in the panel, and the card shows those words (`✎ TODO later`), until you come back and continue from there.
 >
-> The narrow-screen floating pill is mounted by the plugin itself and has no `useSessions`; the host therefore also
+- **The pill is draggable on phones**: press and drag it anywhere; the position is stored in localStorage and survives
+  a refresh. The panel flips its anchor with the drop point (left half → left-aligned, bottom half → opens upward) so it
+  never leaves the screen. Default position is on the right, aligned with the conversation header's view tabs
+  (`PILL_DEFAULT_TOP`).
+- The narrow-screen floating pill is mounted by the plugin itself and has no `useSessions`; the host therefore also
 > serves `/dingo.sessions` (a compact `sessionController.list()` view, refreshed every 5s, capped at 200 entries), so
 > draft-only sessions and their titles show up on the phone as well.
 

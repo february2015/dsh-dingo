@@ -6,8 +6,10 @@
 import { describe, expect, it } from 'vitest'
 import {
   cardRank,
+  clampPillPosition,
   draftTextFrom,
   readAllDrafts,
+  readStoredPillPosition,
   summaryBucket,
   type SessionCardView,
   type SessionCardStatus,
@@ -107,5 +109,27 @@ describe('草稿存储解析', () => {
 
   it('无 localStorage 时返回空表而不是抛错', () => {
     expect(readAllDrafts()).toEqual({})
+  })
+})
+
+describe('手机浮层胶囊位置', () => {
+  const viewport = { width: 390, height: 844 }
+  const size = { width: 60, height: 24 }
+
+  it('视口内原样返回', () => {
+    expect(clampPillPosition({ x: 200, y: 300 }, viewport, size)).toEqual({ x: 200, y: 300 })
+  })
+
+  it('越界夹回视口（四边留 margin）', () => {
+    expect(clampPillPosition({ x: 9999, y: 9999 }, viewport, size)).toEqual({ x: 390 - 60 - 4, y: 844 - 24 - 4 })
+    expect(clampPillPosition({ x: -50, y: -50 }, viewport, size)).toEqual({ x: 4, y: 4 })
+  })
+
+  it('胶囊比视口还大时退化为 margin 处（不产生负坐标）', () => {
+    expect(clampPillPosition({ x: 100, y: 100 }, { width: 40, height: 10 }, size)).toEqual({ x: 4, y: 4 })
+  })
+
+  it('无 localStorage 时没有历史位置（用默认右上角）', () => {
+    expect(readStoredPillPosition()).toBeUndefined()
   })
 })
