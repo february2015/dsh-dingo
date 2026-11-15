@@ -38,6 +38,29 @@ npm view dsh-dingo version   # 应显示新版本（刚发布有短暂传播延�
   `npm_config_cache="$PWD/.npm-cache" npm <cmd>`，发布后删掉该目录。
 - **沙箱外**（用户自己的终端）：npm 一切正常，无此问题。
 
+## ⚠️ 2FA 账号：publish 必须用「绕过 2FA」的 token
+
+- **症状**：`npm whoami` 正常返回账号，但 `npm publish` 报
+  `EOTP This operation requires a one-time password`。
+- **原因**：账号开了 2FA（auth-and-writes）时，**Token 有效 ≠ 能发布**。
+  网页上新建的 **Granular Access Token** 默认仍要求发布时输入动态码；我在非交互 shell 里没法输入。
+- **解法**（二选一）：
+  1. 建 Granular token 时勾上 **"Bypass two-factor authentication when publishing"**，
+     权限给 `Read and write`、包选 `dsh-dingo` 或 All packages；
+  2. 用 **Classic Token → Automation**（Automation 天生绕过 2FA）。
+  判断 token 类型：`npm_` 开头 40 位 = Granular；36 位 UUID = Classic。
+- 注意动态码 30s 过期，**别通过聊天转交**——让发布者在本机终端里直接 `npm publish` 更快。
+
+## ⚠️ 发布成功但 registry 查不到：先等扫描，别急着重发
+
+- **症状**：`npm publish` 输出 `+ dsh-dingo@x.y.z` 且退出码 0，但
+  `npm view` / 直接查 registry 仍然 404、`latest` 还是旧版本。
+- **原因**：registry 对新上传返回 **HTTP 202 Accepted**（日志里 `PUT ... 202`），
+  表示进入异步安全扫描，完成后版本才会出现在 packument 里。
+- **处理**：轮询 `curl -s -o /dev/null -w '%{http_code}' https://registry.npmjs.org/dsh-dingo/<版本>`
+  直到 200（2.5.0 实测约 3 分钟）。**期间不要重复 publish**，否则会撞版本已存在。
+- 另注意 `npm view` 会读本地缓存（`.npm-cache/_cacache`），验证线上状态请直接 curl registry。
+
 ## 包信息
 
 - npm 包名：`dsh-dingo`（registry.npmjs.org，登录账号 robinwlive；latest 已升至 2.5.0）
