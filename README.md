@@ -62,6 +62,9 @@
   a refresh. The panel flips its anchor with the drop point (left half → left-aligned, bottom half → opens upward) so it
   never leaves the screen. Default position is on the right, aligned with the conversation header's view tabs
   (`PILL_DEFAULT_TOP`).
+- **A fullscreen button sits at the pill's right edge**: tap to enter fullscreen, tap again to exit (Fullscreen API,
+  state synced from `fullscreenchange`). iPhone Safari does not support element fullscreen, so the button hides itself
+  there instead of doing nothing.
 - The narrow-screen floating pill is mounted by the plugin itself and has no `useSessions`; the host therefore also
 > serves `/dingo.sessions` (a compact `sessionController.list()` view, refreshed every 5s, capped at 200 entries), so
 > draft-only sessions and their titles show up on the phone as well.

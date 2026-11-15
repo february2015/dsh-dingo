@@ -268,6 +268,8 @@ function ensureStyles(): void {
     '.lv-fb__full:hover { filter: brightness(1.15); }',
     // 图钉按钮：悬停提亮，键盘 Tab 到时有明确焦点环（内联样式做不了 :hover）。
     '.lv-fb-pin:hover { filter: brightness(1.3); }',
+    '.lv-fb-fs:hover { filter: brightness(1.3); }',
+    '.lv-fb-fs:focus-visible { outline: 2px solid #60a5fa; outline-offset: 1px; }',
     '.lv-fb-pin:focus-visible { outline: 2px solid #f59e0b; outline-offset: 1px; }',
     '@keyframes lv-fb-spin { from { transform: rotate(0deg); } to { transform: rotate(360deg); } }',
     '@keyframes lv-fb-pulse { 0%, 100% { opacity: 1; } 50% { opacity: 0.25; } }',
@@ -610,6 +612,46 @@ export function SessionCardRailCompact({ rpc, openSession: openTarget, useSessio
     if (!drag.moved) return
     draggedRef.current = true
     if (drag.latest !== undefined) storePillPosition(drag.latest)
+  }
+
+  /** 浏览器是否支持元素全屏（iPhone Safari 对非 video 元素不支持 → 隐藏按钮）。 */
+  const fullscreenSupported = typeof document !== 'undefined'
+    && ((document as Document & { webkitFullscreenEnabled?: boolean }).fullscreenEnabled === true
+      || (document as Document & { webkitFullscreenEnabled?: boolean }).webkitFullscreenEnabled === true)
+  /** 当前是否全屏（用 fullscreenchange 同步，别自己猜）。 */
+  const [isFullscreen, setIsFullscreen] = useState(false)
+  useEffect(() => {
+    if (typeof document === 'undefined') return () => {}
+    const doc = document as Document & { webkitFullscreenElement?: Element | null }
+    const sync = (): void => setIsFullscreen((doc.fullscreenElement ?? doc.webkitFullscreenElement ?? null) !== null)
+    sync()
+    doc.addEventListener('fullscreenchange', sync)
+    doc.addEventListener('webkitfullscreenchange', sync)
+    return () => {
+      doc.removeEventListener('fullscreenchange', sync)
+      doc.removeEventListener('webkitfullscreenchange', sync)
+    }
+  }, [])
+
+  /** 切换全屏（必须在用户手势里调用；被拒时静默，状态由 fullscreenchange 决定）。 */
+  const toggleFullscreen = async (): Promise<void> => {
+    if (typeof document === 'undefined') return
+    const doc = document as Document & {
+      webkitFullscreenElement?: Element | null
+      webkitExitFullscreen?: () => Promise<void> | void
+    }
+    const root = document.documentElement as Element & {
+      webkitRequestFullscreen?: () => Promise<void> | void
+    }
+    try {
+      if ((doc.fullscreenElement ?? doc.webkitFullscreenElement ?? null) !== null) {
+        await (doc.exitFullscreen?.() ?? doc.webkitExitFullscreen?.())
+      } else {
+        await (root.requestFullscreen?.() ?? root.webkitRequestFullscreen?.())
+      }
+    } catch {
+      // 浏览器策略拒绝（iOS 非 video 元素、iframe 未授权等）：保持原状
+    }
   }
 
   // 视口变化（旋转/软键盘）时把药丸夹回可见区域。
@@ -1020,6 +1062,8 @@ export function SessionCardRailCompact({ rpc, openSession: openTarget, useSessio
           WebkitUserSelect: 'none',
           WebkitTouchCallout: 'none',
           cursor: 'grab',
+          // 右侧留出全屏按钮的位置（浏览器不支持全屏就不留）。
+          paddingRight: fullscreenSupported ? 24 : undefined,
         }
       : {}),
     ...(priorityColor
@@ -1130,6 +1174,25 @@ export function SessionCardRailCompact({ rpc, openSession: openTarget, useSessio
         {/* 展开态全宽条：右侧补一个会话总数说明，避免长条留白。 */}
         {wide !== false && <span style={styles.barHint}>{panelItems.length} 个活跃会话</span>}
       </button>
+      {/* 手机浮层：药丸最右侧的全屏开关。做成兄弟节点 + 绝对定位——button 里套 button 非法，
+          而且这样不会把 pointerdown 传给拖拽逻辑。 */}
+      {floating && fullscreenSupported && (
+        <button
+          type="button"
+          className="lv-fb-fs"
+          style={styles.fullscreen}
+          title={isFullscreen ? '退出全屏' : '进入全屏'}
+          aria-label={isFullscreen ? '退出全屏' : '进入全屏'}
+          aria-pressed={isFullscreen}
+          onPointerDown={(event) => event.stopPropagation()}
+          onClick={(event) => {
+            event.stopPropagation()
+            void toggleFullscreen()
+          }}
+        >
+          <FullscreenIcon active={isFullscreen} />
+        </button>
+      )}
       {panelOpen && (
         // 展开态面板与横条完全等宽（left/right 0 + 去掉 minWidth 撑宽）——
         // 永不越过条的右缘，任何侧边栏宽度下右侧都不会被遮掩/裁切；
@@ -1197,6 +1260,27 @@ export function SessionCardRailCompact({ rpc, openSession: openTarget, useSessio
         </div>
       )}
     </div>
+  )
+}
+
+/**
+ * 全屏图标：未全屏 = 四角朝外（进入）；全屏中 = 四角朝内（退出）。
+ * @param active - 当前是否处于全屏。
+ */
+function FullscreenIcon({ active }: { active: boolean }): JSX.Element {
+  return (
+    <svg width="12" height="12" viewBox="0 0 24 24" aria-hidden="true" focusable="false" style={{ display: 'block' }}>
+      <path
+        d={active
+          ? 'M9 4v5H4M15 4v5h5M15 20v-5h5M9 20v-5H4'
+          : 'M4 9V4h5M20 9V4h-5M20 15v5h-5M4 15v5h5'}
+        fill="none"
+        stroke="currentColor"
+        strokeWidth="2"
+        strokeLinecap="round"
+        strokeLinejoin="round"
+      />
+    </svg>
   )
 }
 
@@ -1433,6 +1517,26 @@ const styles: Record<string, React.CSSProperties> = {
   panelHint: {
     fontSize: 11,
     color: '#9aa3b2',
+  },
+  /** 药丸右端的全屏按钮（浮层专用，叠在药丸上）。 */
+  fullscreen: {
+    position: 'absolute',
+    top: '50%',
+    right: 2,
+    transform: 'translateY(-50%)',
+    display: 'inline-flex',
+    alignItems: 'center',
+    justifyContent: 'center',
+    width: 20,
+    height: 20,
+    padding: 0,
+    borderRadius: 999,
+    border: 'none',
+    background: 'rgba(148,163,184,0.18)',
+    color: '#cbd5e1',
+    lineHeight: 0,
+    cursor: 'pointer',
+    zIndex: 1,
   },
   /** 图钉按钮：22×22 圆形按钮，图标颜色由 currentColor 决定。 */
   lock: {
