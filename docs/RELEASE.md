@@ -1,8 +1,8 @@
 # 发布备忘（GitHub + NPM）
 
 > 2026-08-15 首次发布：`dsh-dingo@0.1.0`；2026-08-16 升 1.0.0（功能完整版）；
-> 2026-08 本地进入 2.0（会话 1:1 常驻卡片 + 自动命名），`package.json` 版本已对齐
-> `2.0.0`，待发版（含 `npm version major` 打 `v2.0.0` tag 与 `npm publish`）。
+> 2026-08 进入 2.0（会话 1:1 常驻卡片 + 自动命名）；2026-11-15 发布 **2.5.0**
+> （适配 DSH 0.2.2：自动命名恢复、草稿全量、面板交互、手机浮层拖拽/全屏、`/dingo.sessions`）。
 > 本文档记录完整发布流程与踩坑，方便后续发版直接照做。
 
 ## 发版流程
@@ -40,8 +40,9 @@ npm view dsh-dingo version   # 应显示新版本（刚发布有短暂传播延�
 
 ## 包信息
 
-- npm 包名：`dsh-dingo`（registry.npmjs.org，登录账号 robinwlive；latest 已升至 2.0.0）
-- GitHub：https://github.com/february2015/dsh-dingo（主分支策略：发版推 `v2.0` 分支并打 tag，`main` 合并按需独立执行）
+- npm 包名：`dsh-dingo`（registry.npmjs.org，登录账号 robinwlive；latest 已升至 2.5.0）
+- GitHub：https://github.com/february2015/dsh-dingo（**主分支策略：`main` 即发版线**。
+  早期用的 `v2.0` 分支已在 2.5.0 时快进合并进 `main` 并删除，之后一律在 `main` 上提交、打 tag、推送）
 - 打包内容（`files` 字段）：`lib/`（构建产物 + 类型）、`cordis.patch.yml`、
   `README.md`（英文默认）、`README.zh.md`（中文）、`LICENSE`；
   `prepare` / `prepack` 都会自动跑 `build` 重建 `lib/`（git / npm 安装时同样生效）。
