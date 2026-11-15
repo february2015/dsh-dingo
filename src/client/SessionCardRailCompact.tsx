@@ -89,6 +89,60 @@ export function clampPillPosition(
   }
 }
 
+/** 浮层面板几何（相对药丸左上角的偏移 + 尺寸 + 朝向）。 */
+export interface PanelGeometry {
+  /** 面板左边相对药丸左边的偏移（px，负数=向左伸）。 */
+  readonly left: number
+  /** 面板宽度（px）。 */
+  readonly width: number
+  /** 面板最大高度（px，按该侧可用空间夹紧）。 */
+  readonly maxHeight: number
+  /** true = 向上弹（药丸下方空间不够时）。 */
+  readonly openUpward: boolean
+}
+
+/**
+ * 按药丸落点算出面板该摆哪：水平夹进视口、垂直按剩余空间选方向并限高。
+ *
+ * 之前只按"左/右半屏"二分，面板宽 86vw 时拖到中间必有一侧出界；这里改成
+ * 以像素为准：面板左边缘被夹在 [margin, 视口宽 - 面板宽 - margin] 内，
+ * 再换算成"相对药丸左边"的偏移。纵向同理，先看下方够不够，不够就向上弹，
+ * 并把 maxHeight 限制在该侧实际可用高度内，保证整块面板永远在屏幕里。
+ * @param input - 药丸位置/尺寸、视口、期望最大高度。
+ * @returns 面板几何。
+ */
+export function computePanelGeometry(input: {
+  pillLeft: number
+  pillTop: number
+  pillHeight: number
+  viewport: { width: number; height: number }
+  /** 期望的最大高度（默认 60% 屏高、上限 420）。 */
+  preferredMaxHeight?: number
+  /** 距屏幕边缘的留白（默认 8）。 */
+  margin?: number
+}): PanelGeometry {
+  const margin = input.margin ?? 8
+  const viewportWidth = Math.max(input.viewport.width, 1)
+  const viewportHeight = Math.max(input.viewport.height, 1)
+  // 宽度取 86% 屏宽但不超过 320，并在小屏上不低于 240（再窄也没法读）。
+  const width = Math.min(Math.max(viewportWidth * 0.86, Math.min(240, viewportWidth - margin * 2)), 320)
+  const desiredLeft = Math.min(
+    Math.max(input.pillLeft, margin),
+    Math.max(margin, viewportWidth - width - margin),
+  )
+  const preferred = input.preferredMaxHeight ?? Math.min(viewportHeight * 0.6, 420)
+  const spaceBelow = viewportHeight - (input.pillTop + input.pillHeight) - margin
+  const spaceAbove = input.pillTop - margin
+  const openUpward = spaceBelow < Math.min(preferred, 200) && spaceAbove > spaceBelow
+  const available = openUpward ? spaceAbove : spaceBelow
+  return {
+    left: desiredLeft - input.pillLeft,
+    width,
+    maxHeight: Math.max(120, Math.min(preferred, available)),
+    openUpward,
+  }
+}
+
 /** 读上次拖到的位置（无记录/坏数据 → undefined = 默认右上角）。 */
 export function readStoredPillPosition(): PillPosition | undefined {
   if (typeof localStorage === 'undefined') return undefined
@@ -618,6 +672,11 @@ export function SessionCardRailCompact({ rpc, openSession: openTarget, useSessio
   const fullscreenSupported = typeof document !== 'undefined'
     && ((document as Document & { webkitFullscreenEnabled?: boolean }).fullscreenEnabled === true
       || (document as Document & { webkitFullscreenEnabled?: boolean }).webkitFullscreenEnabled === true)
+  /** 视口尺寸（旋转/软键盘会变；浮层面板几何要用它，顺带触发重算）。 */
+  const [viewportSize, setViewportSize] = useState<{ width: number; height: number }>(() => ({
+    width: typeof window === 'undefined' ? 0 : window.innerWidth,
+    height: typeof window === 'undefined' ? 0 : window.innerHeight,
+  }))
   /** 当前是否全屏（用 fullscreenchange 同步，别自己猜）。 */
   const [isFullscreen, setIsFullscreen] = useState(false)
   useEffect(() => {
@@ -658,6 +717,7 @@ export function SessionCardRailCompact({ rpc, openSession: openTarget, useSessio
   useEffect(() => {
     if (!floating || typeof window === 'undefined') return () => {}
     const onResize = (): void => {
+      setViewportSize({ width: window.innerWidth, height: window.innerHeight })
       setPillPos((prev) => {
         if (prev === undefined) return prev
         const { viewport, size } = pillViewport()
@@ -1043,11 +1103,34 @@ export function SessionCardRailCompact({ rpc, openSession: openTarget, useSessio
       ? 'lv-fb-breathe 1.8s ease-in-out infinite, lv-fb-border-pulse 1s ease-in-out infinite'
       : undefined
 
-  // 浮层面板朝向：拖到右半边就右对齐，拖到下半屏就向上弹（否则会跑出屏幕）。
-  const viewportWidth = typeof window === 'undefined' ? 0 : window.innerWidth
-  const viewportHeight = typeof window === 'undefined' ? 0 : window.innerHeight
-  const pillOnRightHalf = pillPos === undefined ? true : pillPos.x >= viewportWidth / 2
-  const pillOnBottomHalf = pillPos === undefined ? false : pillPos.y >= viewportHeight / 2
+  /**
+   * 浮层面板几何：按药丸真实落点把面板夹进屏幕（水平夹边缘、垂直按剩余空间选方向 + 限高）。
+   * 只在面板开着时算，避免每帧读布局。
+   */
+  const panelGeometry = !floating || !panelOpen
+    ? undefined
+    : (() => {
+        const rect = railRef.current?.getBoundingClientRect()
+        return computePanelGeometry({
+          pillLeft: rect?.left ?? pillPos?.x ?? Math.max(0, viewportSize.width - PILL_DEFAULT_RIGHT - 96),
+          pillTop: rect?.top ?? pillPos?.y ?? PILL_DEFAULT_TOP,
+          pillHeight: rect?.height ?? 24,
+          viewport: viewportSize,
+        })
+      })()
+  /** 浮层专用面板样式（没算出来就退回原样式，绝不越界）。 */
+  const floatingPanelStyle: React.CSSProperties = panelGeometry === undefined
+    ? {}
+    : {
+        left: panelGeometry.left,
+        right: 'auto',
+        ...(panelGeometry.openUpward
+          ? { top: 'auto', bottom: '100%', marginTop: 0, marginBottom: 6 }
+          : { top: '100%', bottom: 'auto', marginTop: 6, marginBottom: 0 }),
+        minWidth: 0,
+        width: panelGeometry.width,
+        maxHeight: panelGeometry.maxHeight,
+      }
 
   const summaryStyle: React.CSSProperties = {
     // 展开态为独立全宽条（summaryBar）；折叠 rail / 窄屏浮层时缩回紧凑小胶囊。
@@ -1172,7 +1255,8 @@ export function SessionCardRailCompact({ rpc, openSession: openTarget, useSessio
           </span>
         )}
         {/* 展开态全宽条：右侧补一个会话总数说明，避免长条留白。 */}
-        {wide !== false && <span style={styles.barHint}>{panelItems.length} 个活跃会话</span>}
+        {/* 「N 个活跃会话」只在侧栏那条宽横条上显示；手机浮层宽度紧张，不写。 */}
+        {!floating && wide !== false && <span style={styles.barHint}>{panelItems.length} 个活跃会话</span>}
       </button>
       {/* 手机浮层：药丸最右侧的全屏开关。做成兄弟节点 + 绝对定位——button 里套 button 非法，
           而且这样不会把 pointerdown 传给拖拽逻辑。 */}
@@ -1201,17 +1285,7 @@ export function SessionCardRailCompact({ rpc, openSession: openTarget, useSessio
           style={{
             ...styles.panel,
             ...(floating
-              ? {
-                  // 拖到左半边就左对齐、拖到下半屏就向上弹，避免面板跑出屏幕。
-                  left: pillOnRightHalf ? 'auto' : 0,
-                  right: pillOnRightHalf ? 0 : 'auto',
-                  ...(pillOnBottomHalf
-                    ? { top: 'auto', bottom: '100%', marginTop: 0, marginBottom: 6 }
-                    : { top: '100%', bottom: 'auto', marginTop: 6, marginBottom: 0 }),
-                  minWidth: 0,
-                  width: 'min(86vw, 320px)',
-                  maxHeight: '60vh',
-                }
+              ? floatingPanelStyle
               : wide === false
                 ? { right: 0 }
                 : { left: 0, right: 0, minWidth: 0 }),

@@ -7,6 +7,7 @@ import { describe, expect, it } from 'vitest'
 import {
   cardRank,
   clampPillPosition,
+  computePanelGeometry,
   draftTextFrom,
   readAllDrafts,
   readStoredPillPosition,
@@ -131,5 +132,42 @@ describe('手机浮层胶囊位置', () => {
 
   it('无 localStorage 时没有历史位置（用默认右上角）', () => {
     expect(readStoredPillPosition()).toBeUndefined()
+  })
+})
+
+describe('浮层面板几何', () => {
+  const viewport = { width: 390, height: 844 }
+
+  it('药丸在右侧：面板向左伸且右缘不出界', () => {
+    const geom = computePanelGeometry({ pillLeft: 280, pillTop: 52, pillHeight: 24, viewport })
+    expect(geom.width).toBeLessThanOrEqual(320)
+    // 面板右缘 = 药丸左边 + 偏移 + 宽 ≤ 屏宽 - 边距
+    expect(280 + geom.left + geom.width).toBeLessThanOrEqual(390 - 8 + 0.01)
+    expect(geom.openUpward).toBe(false)
+  })
+
+  it('药丸拖到中间也不会两边出界', () => {
+    const geom = computePanelGeometry({ pillLeft: 150, pillTop: 400, pillHeight: 24, viewport })
+    expect(150 + geom.left).toBeGreaterThanOrEqual(8 - 0.01)
+    expect(150 + geom.left + geom.width).toBeLessThanOrEqual(390 - 8 + 0.01)
+  })
+
+  it('药丸在左上角：面板贴左边距，不出左界', () => {
+    const geom = computePanelGeometry({ pillLeft: 4, pillTop: 40, pillHeight: 24, viewport })
+    expect(4 + geom.left).toBeCloseTo(8, 5)
+  })
+
+  it('药丸在下半屏：向上弹，且高度不超过上方可用空间', () => {
+    const geom = computePanelGeometry({ pillLeft: 300, pillTop: 700, pillHeight: 24, viewport })
+    expect(geom.openUpward).toBe(true)
+    expect(geom.maxHeight).toBeLessThanOrEqual(Math.max(120, 700 - 8))
+    expect(geom.maxHeight).toBeGreaterThanOrEqual(120)
+  })
+
+  it('小屏（宽 320）时宽度跟着收缩，仍不出界', () => {
+    const geom = computePanelGeometry({ pillLeft: 200, pillTop: 100, pillHeight: 24, viewport: { width: 320, height: 568 } })
+    expect(geom.width).toBeLessThanOrEqual(320)
+    expect(geom.width).toBeGreaterThanOrEqual(240)
+    expect(200 + geom.left + geom.width).toBeLessThanOrEqual(320 - 8 + 0.01)
   })
 })
