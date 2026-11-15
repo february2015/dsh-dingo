@@ -1,10 +1,10 @@
-# dsh-dingo 2.4
+# dsh-dingo 2.5
 
 **English** | [中文](README.zh.md)
 
 **Ding + Go** — a DSH plugin for session cards, auto-naming, sounds, and deep links.
 
-## 2.4.1 fixes (DSH 0.2.2)
+## 2.5.0 (DSH 0.2.2)
 
 - Auto-naming works again: `apiProxy` is gone in 0.2, so the button, `/dingo rename` and the
   `rename_current_session` tool now use `sessionController.rename` / `events`, with the legacy
@@ -14,8 +14,19 @@
 - Quiet hours actually replay: the engine now arms a timer at the `quietHours` end instant.
 - System-notification deep links no longer hardcode port 3080; the host's own origin is used when unset.
 - `webServer` is an optional dependency: hosts without a web carrier just skip the `/dingo` RPC.
+- Panel interaction rework: opens instantly on hover; closing is now "outside click → immediate / leave → 2s / idle → 5s",
+  plus a pin toggle that keeps it open (outline grey → filled orange).
+- Summary rules fixed: the current session's Running/Intermediate states now count (they used to fall into "seen");
+  priority is error > question > to-read > draft > waiting > intermediate > running > normal.
+- Drafts are now detected for every session by reading the host's own
+  `localStorage['dsh.conversation.<id>']`; the draft card shows those words, so the panel doubles as a todo list.
+- New `/dingo.sessions` endpoint: the host ships a compact session list (5s cache, 200 cap) so the phone pill gets
+  full session rows and titles, including draft-only sessions.
+- Phone pill is draggable (position remembered) with a fullscreen toggle; the panel is pixel-clamped into the screen
+  from the drop point (flips upward and caps its height when there is no room below).
 - Cleanups: removed the never-effective `channelAuthority` config, debug logs and dead branches;
   `toneStyle` now drives non-current sessions; title-cache reads are negatively cached.
+- Tests 48 → **102**.
 
 ## Features
 
