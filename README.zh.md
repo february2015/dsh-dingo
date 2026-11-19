@@ -2,6 +2,15 @@
 
 [English](README.md) | **中文**
 
+> **2.5.1（2026-11-19）上架插件市场的展示材料**
+>
+> - 新增 `icon.svg`（顶层 `icon`，同时导出 `./icon`）与市场用的 180px PNG 图标；
+> - 新增 `locale/en.json`、`locale/zh.json`（`meta.title` / `description` / `detail`），
+>   以及 `docs/DETAIL.md`、`docs/DETAIL.zh.md` 与配图；
+> - 新增 `screenshots.json`（3 张市场截图），`files` 收录 `locale`、`docs`、`icon.svg`、`screenshots.json`；
+> - 修正 `@deepseek-ai/*` 的 peer 范围：原来匹配不到宿主 0.2.2-rc.5 与 schemastery 3.19.0；
+> - README 补「可选集成」表：明确不依赖任何其他插件，其余服务全部可选。
+>
 > **2.5.0（2026-11-15）可用性与交互大修（基于 DSH 0.2.2 实测）**
 >
 > - **自动命名恢复**：0.2 已移除 `apiProxy`，按钮 / `/dingo rename` / `rename_current_session`
@@ -155,7 +164,23 @@
 
 ---
 
-## 与 TaskSwarm（蜂群）配合
+## 可选集成
+
+**dsh-dingo 不依赖任何其他插件。** 装上 DSH 本体就能用：`package.json` 没有 `dependencies`，
+所有 `@deepseek-ai/*` peer 都是可选的。
+
+除了 `inject` 里声明的两个服务（`connection`、`tools`），其余能力全部用 `ctx.get()` 软取，缺了只降级、不报错：
+
+| 服务 | 用途 | 缺失时 |
+|---|---|---|
+| `jobs` | 后台任务结束触发提醒 | 跳过 jobs 事件源 |
+| `userQuestions` | “需要你回答”状态 | 跳过 questions 事件源 |
+| `llm` | 自动命名（一次独立模型调用） | `Rename` 与 `/dingo rename` 提示命名不可用 |
+| `commands` | `/dingo on\|off\|status\|dnd\|rename` | 不注册斜杠命令 |
+| `webServer` | 手机浮层用的 `/dingo.sessions` | 不挂 RPC 路由；卡片、声音、命令照常 |
+| `taskswarm` | 会话的蜂群/等待状态 | 卡片回退到宿主状态 |
+
+### 与 TaskSwarm（蜂群）配合
 
 dsh-dingo 可以和 [dsh-taskswarm](https://github.com/february2015/dsh-taskswarm) 配合：
 
@@ -222,6 +247,18 @@ npm run verify
 ```
 
 更多实现细节见 [docs/v2-features.md](docs/v2-features.md) 和 [docs/dsh-plugin-dev-tips.md](docs/dsh-plugin-dev-tips.md)。
+
+### 打包与插件展示元数据
+
+npm 包里带着市场展示需要的文件：`icon.svg`（顶层 `icon`，同时导出 `./icon`）、
+`locale/en.json` + `locale/zh.json`（`meta.title`、`meta.description`、`meta.detail`）、
+`docs/` 下的两份详情文档与配图，以及 `screenshots.json`。图标要 ≤256 KiB；详情文档只有一行图片、
+≤1 MiB，图片与其同目录。
+
+`@deepseek-ai/*` 的 peer 范围按已发布的预发布线逐条枚举。node-semver 只允许宿主预发布版本命中
+“比较符元组与它 `major.minor.patch` 完全一致且自带预发布标签”的范围，所以宽泛的
+`>=0.1.0-rc.6 <0.3.0` 会静默排除 `0.2.2-rc.5`；宿主发新预发布线时补一个分支即可。
+所有 peer 都是可选的，范围不匹配不会让 `npm install` 失败。
 
 ## License
 

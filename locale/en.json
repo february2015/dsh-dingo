@@ -1,0 +1,7 @@
+{
+  "meta": {
+    "title": "Dingo Session Radar",
+    "description": "Session radar for DSH: a status card per conversation (error, question, to-read, draft, waiting) and a summary pill on its own row at the bottom of the left sidebar, where it opens the panel and jumps to a session. A per-session sound cue plays when a background session replies, followed by an OS notification while the app is unfocused. Rename and /dingo rename title a session through a separate model call, and drafts are read from the host's own localStorage. TaskSwarm is optional and picked up when present.",
+    "detail": "docs/DETAIL.md"
+  }
+}

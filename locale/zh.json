@@ -1,0 +1,7 @@
+{
+  "meta": {
+    "title": "Dingo 会话雷达",
+    "description": "DSH 的会话雷达：每个对话一张状态卡（异常、疑问、待阅读、草稿、等待），侧栏底部独占一行的统计胶囊可展开面板并直达会话。后台对话有回复时按会话分档发声提醒，切到其他应用时追加系统通知。Rename 与 /dingo rename 会额外发起一次独立模型调用给会话命名，草稿读取宿主自己的 localStorage。TaskSwarm 为可选，检测到即接入。",
+    "detail": "docs/DETAIL.zh.md"
+  }
+}

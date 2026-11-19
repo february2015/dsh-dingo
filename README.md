@@ -4,6 +4,16 @@
 
 **Ding + Go** — a DSH plugin for session cards, auto-naming, sounds, and deep links.
 
+## 2.5.1 (plugin-market metadata)
+
+- Added `icon.svg` (top-level `icon`, also exported as `./icon`) and a 180px PNG for storefront listings.
+- Added `locale/en.json` and `locale/zh.json` (`meta.title`, `meta.description`, `meta.detail`) with
+  `docs/DETAIL.md` / `docs/DETAIL.zh.md` and their preview images.
+- Added `screenshots.json` (three screenshots) and `locale`, `docs`, `icon.svg`, `screenshots.json` to `files`.
+- Fixed the `@deepseek-ai/*` peer ranges: the previous ones did not match the host that ships
+  `0.2.2-rc.5` and `schemastery` 3.19.0.
+- Documented that the plugin depends on no other plugin; every extra service is optional.
+
 ## 2.5.0 (DSH 0.2.2)
 
 - Auto-naming works again: `apiProxy` is gone in 0.2, so the button, `/dingo rename` and the
@@ -121,7 +131,24 @@
 | Natural language in chat | main LLM generates title, then calls `rename_current_session` tool |
 | `/dingo rename` | fallback command using the independent Flash path |
 
-## TaskSwarm Integration
+## Optional integrations
+
+**dsh-dingo has no plugin dependencies.** Installing it needs DSH itself and nothing else: `package.json`
+declares no `dependencies`, and every `@deepseek-ai/*` peer is optional.
+
+Beyond the two services it declares in `inject` (`connection`, `tools`), everything it touches is read with
+`ctx.get()` and degrades instead of failing:
+
+| Service | Used for | Without it |
+|---|---|---|
+| `jobs` | a finished background job triggers a cue | the jobs event source is skipped |
+| `userQuestions` | the "needs your answer" state | the questions event source is skipped |
+| `llm` | auto-naming, through a separate model call | `Rename` and `/dingo rename` report that naming is unavailable |
+| `commands` | `/dingo on\|off\|status\|dnd\|rename` | the slash commands are not registered |
+| `webServer` | `/dingo.sessions` for the phone pill | the RPC routes are not mounted; cards, sounds and commands still work |
+| `taskswarm` | swarm / waiting state of a session | cards fall back to host states |
+
+### TaskSwarm
 
 dsh-dingo can work with [dsh-taskswarm](https://github.com/february2015/dsh-taskswarm):
 
@@ -162,6 +189,18 @@ npm run verify
 ```
 
 See [docs/v2-features.md](docs/v2-features.md) and [docs/dsh-plugin-dev-tips.md](docs/dsh-plugin-dev-tips.md).
+
+### Packaging and plugin metadata
+
+The published package carries its storefront metadata: `icon.svg` (top-level `icon`, also exported as `./icon`),
+`locale/en.json` + `locale/zh.json` (`meta.title`, `meta.description`, `meta.detail`) with the two detail documents
+and their preview images under `docs/`, and `screenshots.json`. The icon must stay under 256 KiB; a detail document
+is one image line, under 1 MiB, with exactly one image beside it.
+
+Peer ranges for `@deepseek-ai/*` list each published prerelease line explicitly. node-semver only lets a prerelease
+version satisfy a range when a comparator sits on the same `major.minor.patch` tuple, so a wide
+`>=0.1.0-rc.6 <0.3.0` silently excludes `0.2.2-rc.5`; add a branch when a new prerelease patch line ships. Every peer
+is optional, so a mismatch never breaks `npm install`.
 
 ## License
 

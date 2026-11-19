@@ -61,6 +61,28 @@ npm view dsh-dingo version   # 应显示新版本（刚发布有短暂传播延�
   直到 200（2.5.0 实测约 3 分钟）。**期间不要重复 publish**，否则会撞版本已存在。
 - 另注意 `npm view` 会读本地缓存（`.npm-cache/_cacache`），验证线上状态请直接 curl registry。
 
+## 插件市场（awesome-dsh-plugin）
+
+DSH 的「发现」页不抓 npm，只读精选表 [awesome-dsh-plugin](https://github.com/awesome-dsh-plugin/awesome-dsh-plugin)：
+提交一个 `data/plugins/february2015__dsh-dingo.yml` 的 PR，合并后站点与市场通常在一天内出现。条目字段：
+
+```yaml
+url: https://github.com/february2015/dsh-dingo
+name: february2015/dsh-dingo
+category: notify
+description:
+  en: One sentence, ending with a period.
+  zh: 一句话，句号结尾。
+icon: https://raw.githubusercontent.com/february2015/dsh-dingo/main/docs/assets/icon-180.png
+```
+
+列表只收 GitHub 托管的位图 icon（拒 SVG），所以市场图标用 `docs/assets/icon-180.png`，包内展示图标仍是
+`icon.svg`（`icon` 字段 + `./icon` 导出）。`screenshots.json` 是本仓库详情的截图清单，同样只能是仓库内的位图。
+
+包侧的展示元数据（不影响运行，但详情页靠它渲染）：`locale/en.json`、`locale/zh.json` 的
+`meta.title` / `meta.description` / `meta.detail`；`meta.detail` 必须指向包内子目录的 `.md`，
+文档里正好一行图片，图片与文档同目录。三个文件都必须进 `files`，否则从 npm 安装后详情页是空白。
+
 ## 包信息
 
 - npm 包名：`dsh-dingo`（registry.npmjs.org，登录账号 robinwlive；latest 已升至 2.5.0）

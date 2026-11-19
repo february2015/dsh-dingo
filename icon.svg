@@ -1,0 +1,26 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="180" height="180" viewBox="0 0 180 180" role="img" aria-label="Dingo session radar">
+  <defs>
+    <linearGradient id="bell" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#fbbf24"/>
+      <stop offset="1" stop-color="#f59e0b"/>
+    </linearGradient>
+  </defs>
+  <rect x="5" y="5" width="170" height="170" rx="38" fill="#14161c" stroke="#2d3340" stroke-width="4"/>
+
+  <!-- ringing bell: two sound waves, then the bell body -->
+  <g fill="none" stroke-linecap="round">
+    <path d="M38 66 A34 34 0 0 0 38 114" stroke="#ef4444" stroke-width="7" opacity="0.85"/>
+    <path d="M142 66 A34 34 0 0 1 142 114" stroke="#22c55e" stroke-width="7" opacity="0.85"/>
+    <path d="M55 74 A22 22 0 0 0 55 106" stroke="#f59e0b" stroke-width="6" opacity="0.55"/>
+    <path d="M125 74 A22 22 0 0 1 125 106" stroke="#f59e0b" stroke-width="6" opacity="0.55"/>
+  </g>
+
+  <path d="M90 42c-15.5 0-26 11.8-26 27.4v18.9l-9.4 11.4a4 4 0 0 0 3.1 6.6h64.6a4 4 0 0 0 3.1-6.6L116 88.3V69.4C116 53.8 105.5 42 90 42z"
+        fill="url(#bell)"/>
+  <circle cx="90" cy="113" r="9" fill="#fbbf24"/>
+
+  <!-- status dots under the bell: error, question, done -->
+  <circle cx="66" cy="140" r="6.5" fill="#ef4444"/>
+  <circle cx="90" cy="140" r="6.5" fill="#a855f7"/>
+  <circle cx="114" cy="140" r="6.5" fill="#22c55e"/>
+</svg>
